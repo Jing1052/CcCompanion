@@ -1,0 +1,93 @@
+name: Bug report / 反馈一个 bug
+description: 发现 ccc 用起来不对劲 / 装不上 / 闪退 / 推送不响, 用这个模板报。
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢报 bug。请尽量按下面项目填, 让我们能复现你遇到的情况。
+        Thanks for filing a bug. Please fill in as much detail as you can so we can reproduce.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: 发生了什么 / What happened
+      description: 一句话讲清你做什么 → 你期望什么 → 实际发生什么。
+      placeholder: |
+        例如: 我点 /switch bao 之后再发消息, 期望发到 bao session, 但消息还是发到 opia。
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤 / Steps to reproduce
+      description: 按 1, 2, 3 这样列出你做了哪些动作。我们需要能照着复现。
+      placeholder: |
+        1. 打开 ccc
+        2. 在 chat tab 发 /list, 看到 sessions
+        3. 发 /switch bao
+        4. 发"hi"
+        5. 实际收到 opia 的回复, 不是 bao 的
+    validations:
+      required: true
+
+  - type: input
+    id: ccc-version
+    attributes:
+      label: ccc 版本 / ccc build number
+      description: ccc app 内"设置 → CcCompanion"段最底下有 build 号。
+      placeholder: "build 199"
+    validations:
+      required: true
+
+  - type: input
+    id: ios-version
+    attributes:
+      label: iOS 版本
+      description: iPhone "设置 → 通用 → 关于本机" 看版本号。
+      placeholder: "iOS 18.2"
+    validations:
+      required: true
+
+  - type: input
+    id: macos-version
+    attributes:
+      label: macOS 版本
+      description: Mac "关于本机"看版本号。
+      placeholder: "macOS 14.6.1"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: push-channel
+    attributes:
+      label: 推送通道 / Push channel
+      description: 你用的是哪个推送方案?
+      options:
+        - APNS (Apple Developer p8)
+        - Bark
+        - 都没装 (前台轮询)
+        - 不确定
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志 / Logs (可选)
+      description: |
+        如果方便, 贴一段 server 日志:
+        `tail -40 ~/Opia/apns-server/server.err.log`
+        或者 Xcode console 报错截图。
+      render: shell
+      placeholder: |
+        2026-05-14 08:30:12 [chat-append] sid=opia msg=xxx
+        ...
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: 其它想说的 / Notes (可选)
+      placeholder: 你怀疑的根因 / 你试过的修法 / 任何关联信息。

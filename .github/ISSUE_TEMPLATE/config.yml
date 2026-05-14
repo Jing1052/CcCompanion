@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 邮件反馈 / Email feedback
+    url: mailto:opia@starryfield.space
+    about: 不方便开 issue 直接发邮件 附上详细问题描述跟截图
+  - name: 文档 / Docs
+    url: https://github.com/CyberSealNull/CcCompanion/tree/main/docs
+    about: 安装跟使用文档 先看一眼可能已经覆盖

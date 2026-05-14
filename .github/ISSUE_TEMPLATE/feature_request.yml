@@ -1,0 +1,43 @@
+name: Feature request / 提一个想法
+description: 想要 ccc 加一个新功能 / 改一个交互, 用这个模板提。
+title: "[Feature] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢提想法。请描述清楚你想要的功能跟你为什么需要它, 我们会评估。
+        Thanks for the suggestion. Tell us what you want and why.
+
+  - type: textarea
+    id: what
+    attributes:
+      label: 你想要什么 / What
+      description: 一句话描述这个功能。
+      placeholder: |
+        例如: 希望 chat 支持长按消息"翻译成英文"。
+    validations:
+      required: true
+
+  - type: textarea
+    id: why
+    attributes:
+      label: 为什么需要 / Why
+      description: 你在什么场景下会用这个? 它能解决你什么问题?
+      placeholder: |
+        例如: 我经常跟海外协作伙伴讨论 cc 的 prompt, 想直接在 chat 里翻译, 不用切到别的 app。
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 你想到的替代方案 / Alternatives (可选)
+      description: 不加这个功能的话, 你现在怎么 workaround?
+      placeholder: 现在我都是复制到 DeepL/ChatGPT 翻译再贴回来。
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: 其它想说的 / Notes (可选)
+      placeholder: UI mockup / 类似 app 的参考 / 实现思路 都可以。
