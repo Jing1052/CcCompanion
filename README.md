@@ -86,7 +86,7 @@ CcCompanion/
 ├── DISCLAIMER.md                ← Anthropic trademark disclaimer
 ├── .gitignore                   ← what we keep out of git (secrets / logs / build / user data)
 ├── ios-app/                     ← SwiftUI iOS app (Xcode project)
-│   └── OpiaCompanion/           ← root Xcode workspace; build scheme `CcCompanion`
+│   └── CcCompanion/           ← root Xcode workspace; build scheme `CcCompanion`
 ├── apns-server/                 ← Python HTTP server (push.py is the entry point)
 │   ├── push.py                  ← main server
 │   ├── apns_client.py           ← Apple Push wrapper
@@ -119,8 +119,8 @@ Other modules (`diary`, `favorites`, `group_chat`, `rp_history`, `studyroom`, `t
 If you don't want to wait on TestFlight you can build the app directly from source:
 
 ```bash
-cd ios-app/OpiaCompanion
-open OpiaCompanion.xcodeproj
+cd ios-app/CcCompanion
+open CcCompanion.xcodeproj
 # In Xcode: select scheme "CcCompanion", configuration "CcRelease",
 #          choose your provisioning team, choose your iPhone, ⌘R.
 ```
@@ -142,8 +142,8 @@ A: Yes. Skip the `[apns]` section of `config.toml` and use [Bark](https://github
 **Q: Is it safe to expose port 8795 to the internet?**
 A: Don't. Run it behind Tailscale / ZeroTier / a reverse proxy with HTTPS + an auth secret. The default `config.toml` ships with `host = "127.0.0.1"` for a reason.
 
-**Q: Why is the Xcode project under `ios-app/OpiaCompanion/`?**
-A: Historical. The codebase grew out of an internal project called OpiaCompanion. The TestFlight binary is named `CcCompanion` (scheme + bundle id); the on-disk Xcode folder kept the legacy name for now. We may rename it in a future cleanup pass.
+**Q: Why is the Xcode project under `ios-app/CcCompanion/`?**
+A: It is the public Xcode project for CcCompanion. The scheme, project folder, and bundle id are now aligned around the public name.
 
 **Q: How do I update?**
 A: `git pull`, then re-build the iOS app and (on the Mac side) restart the `apns-server` LaunchAgent: `launchctl unload ~/Library/LaunchAgents/com.user.apns-server.plist && launchctl load ~/Library/LaunchAgents/com.user.apns-server.plist`.
@@ -159,7 +159,7 @@ Issues and PRs welcome. Some areas where we'd love help:
 
 Before opening a PR, please:
 
-1. Run `xcodebuild -project ios-app/OpiaCompanion/OpiaCompanion.xcodeproj -scheme CcCompanion -configuration CcRelease -destination 'generic/platform=iOS' build` — must succeed.
+1. Run `xcodebuild -project ios-app/CcCompanion/CcCompanion.xcodeproj -scheme CcCompanion -configuration CcRelease -destination 'generic/platform=iOS' build` — must succeed.
 2. Run `python3 -m py_compile apns-server/*.py` — must produce no errors.
 3. Keep secrets / `.p8` / `config.toml` / `tokens/` / `*.jsonl` out of commits (`.gitignore` already covers these).
 

@@ -8,7 +8,7 @@ import threading
 import time
 from typing import Any
 
-logger = logging.getLogger("opia-apns-server.usage")
+logger = logging.getLogger("cc-apns-server.usage")
 
 CCUSAGE_BIN = "/opt/homebrew/bin/ccusage"
 CACHE_TTL_SECONDS = 30

@@ -70,7 +70,7 @@ class APNsClient:
         self._client = httpx.Client(
             http2=True,
             timeout=timeout,
-            headers={"User-Agent": "opia-apns-server/0.1"},
+            headers={"User-Agent": "cc-apns-server/0.1"},
         )
 
     def close(self):

@@ -5,7 +5,7 @@
 [apns]
 # Apple Developer 后台拿
 # .p8 文件下载到本机后路径绝对化
-p8_path = "~/Opia/apns-server/secrets/AuthKey_XXXXXXXXXX.p8"
+p8_path = "~/CcCompanion/apns-server/secrets/AuthKey_XXXXXXXXXX.p8"
 
 # Apple Developer 后台 -> Membership 看 Team ID (10 位字符)
 team_id = "XXXXXXXXXX"
@@ -30,7 +30,7 @@ host = "127.0.0.1"
 port = 8795
 
 # token 持久化路径 (重启后 reload 不丢)
-token_store_path = "~/Opia/apns-server/tokens/active.json"
+token_store_path = "~/CcCompanion/apns-server/tokens/active.json"
 
 # P0-3: 写接口鉴权 token. 留空则启动时自动生成并写 ~/.ots/secret (mode 0600)。
 # 自动生成的 secret 会 log 到控制台，复制到 OTS app onboarding wizard。

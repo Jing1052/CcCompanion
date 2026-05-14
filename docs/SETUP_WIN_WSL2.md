@@ -158,8 +158,8 @@ second 行能看到 `credentials` 文件就行.
 WSL 内:
 
 ```bash
-mkdir -p ~/Opia
-cd ~/Opia
+mkdir -p ~/CcCompanion
+cd ~/CcCompanion
 git clone <你 git 仓库 URL> dynamic-island
 cd dynamic-island/apns-server
 ```
@@ -170,13 +170,13 @@ cd dynamic-island/apns-server
 # 在 Mac 上, 把整个 dynamic-island scp 到 WSL
 # 先在 WSL 跑 ifconfig | grep "inet " 拿 WSL 的 IP
 # 然后 Mac 终端:
-#   scp -r ~/Opia/dynamic-island <你 Win 用户名>@<WSL IP>:~/Opia/
+#   scp -r ~/CcCompanion <你 Win 用户名>@<WSL IP>:~/CcCompanion/
 ```
 
 进项目目录, 建虚拟环境:
 
 ```bash
-cd ~/Opia/dynamic-island/apns-server
+cd ~/CcCompanion/apns-server
 python3.11 -m venv .venv
 source .venv/bin/activate
 pip install --upgrade pip
@@ -201,10 +201,10 @@ cp config.example.toml config.toml
 
 ```toml
 [apns]
-p8_path = "~/Opia/dynamic-island/apns-server/secrets/AuthKey_XXXXXXXXXX.p8"
+p8_path = "~/CcCompanion/apns-server/secrets/AuthKey_XXXXXXXXXX.p8"
 team_id = "XXXXXXXXXX"
 key_id = "XXXXXXXXXX"
-bundle_id = "com.starryfield.OpiaCompanion"
+bundle_id = "com.starryfield.CcCompanion"
 sandbox = false   # TestFlight / App Store build 走 false. Xcode debug build 走 true
 
 [server]
@@ -220,21 +220,21 @@ strict_auth = true
 python3 -c "import secrets; print(secrets.token_hex(16))"
 ```
 
-也可以复用 Mac mini 那台的同一个 secret, 这样 ccc app 端切 endpoint 时不用换. 多个 server 多个 secret 也行, ccc app `OpiaServerConfig` 支持多 endpoint 加 fallback.
+也可以复用 Mac mini 那台的同一个 secret, 这样 ccc app 端切 endpoint 时不用换. 多个 server 多个 secret 也行, ccc app `CcServerConfig` 支持多 endpoint 加 fallback.
 
 `.p8` 私钥从 Mac mini 拷过来:
 
 ```bash
-mkdir -p ~/Opia/dynamic-island/apns-server/secrets
+mkdir -p ~/CcCompanion/apns-server/secrets
 # 在 Mac 上跑, IP 替换:
-#   scp ~/Opia/dynamic-island/apns-server/secrets/AuthKey_*.p8 <Win 用户>@<WSL IP>:~/Opia/dynamic-island/apns-server/secrets/
+#   scp ~/CcCompanion/apns-server/secrets/AuthKey_*.p8 <Win 用户>@<WSL IP>:~/CcCompanion/apns-server/secrets/
 ```
 
 权限锁紧:
 
 ```bash
-chmod 600 ~/Opia/dynamic-island/apns-server/config.toml
-chmod 600 ~/Opia/dynamic-island/apns-server/secrets/*.p8
+chmod 600 ~/CcCompanion/apns-server/config.toml
+chmod 600 ~/CcCompanion/apns-server/secrets/*.p8
 ```
 
 ---
@@ -256,17 +256,17 @@ mkdir -p ~/.config/systemd/user
 ```bash
 tee ~/.config/systemd/user/apns-server.service > /dev/null <<'EOF'
 [Unit]
-Description=Opia APNs server (ccc backend)
+Description=Cc APNs server (ccc backend)
 After=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=%h/Opia/dynamic-island/apns-server
-ExecStart=%h/Opia/dynamic-island/apns-server/.venv/bin/python %h/Opia/dynamic-island/apns-server/push.py
+WorkingDirectory=%h/Cc/dynamic-island/apns-server
+ExecStart=%h/Cc/dynamic-island/apns-server/.venv/bin/python %h/Cc/dynamic-island/apns-server/push.py
 Restart=on-failure
 RestartSec=3
-StandardOutput=append:%h/Opia/dynamic-island/apns-server/push.log
-StandardError=append:%h/Opia/dynamic-island/apns-server/push.err.log
+StandardOutput=append:%h/Cc/dynamic-island/apns-server/push.log
+StandardError=append:%h/Cc/dynamic-island/apns-server/push.err.log
 
 [Install]
 WantedBy=default.target
@@ -324,7 +324,7 @@ curl -s http://127.0.0.1:8795/health
 看 log:
 
 ```bash
-tail -f ~/Opia/dynamic-island/apns-server/push.log
+tail -f ~/CcCompanion/apns-server/push.log
 ```
 
 ### 6.2 简单 tmux 一次性 (调试用, 不推荐生产)
@@ -332,7 +332,7 @@ tail -f ~/Opia/dynamic-island/apns-server/push.log
 如果你只想先测一下不弄 systemd:
 
 ```bash
-tmux new-session -d -s apns "~/Opia/dynamic-island/apns-server/.venv/bin/python ~/Opia/dynamic-island/apns-server/push.py"
+tmux new-session -d -s apns "~/CcCompanion/apns-server/.venv/bin/python ~/CcCompanion/apns-server/push.py"
 tmux new-session -d -s main "claude --dangerously-skip-permissions"
 tmux attach -t apns   # 看 server log
 ```
@@ -532,7 +532,7 @@ ps -p 1 -o comm=
 
 ### /mnt/c 跨 Windows 文件挂载点性能差
 
-不要把 `apns-server` 放在 `/mnt/c/...` 下. 放在 WSL 原生 home `~/Opia/` 下. 跨文件系统 I/O 性能差一个数量级, 而且 systemd unit 走 `/mnt/c` 路径时 working directory 解析也容易踩坑.
+不要把 `apns-server` 放在 `/mnt/c/...` 下. 放在 WSL 原生 home `~/CcCompanion/` 下. 跨文件系统 I/O 性能差一个数量级, 而且 systemd unit 走 `/mnt/c` 路径时 working directory 解析也容易踩坑.
 
 ### secret 文件权限
 
@@ -550,7 +550,7 @@ which claude
 
 ### apns-server import 错
 
-如果 `python push.py` 报 import error, 99% 是没 `source .venv/bin/activate` 直接跑了系统 Python. systemd unit 已经写绝对路径 `%h/Opia/dynamic-island/apns-server/.venv/bin/python` 不踩这坑, 手动 tmux 起的话注意.
+如果 `python push.py` 报 import error, 99% 是没 `source .venv/bin/activate` 直接跑了系统 Python. systemd unit 已经写绝对路径 `%h/Cc/dynamic-island/apns-server/.venv/bin/python` 不踩这坑, 手动 tmux 起的话注意.
 
 ---
 
@@ -569,7 +569,7 @@ which claude
 WSL2 装 Ubuntu 22.04 开 systemd → apt 装 build 工具 + Python + Node + tmux → npm 装 claude code 走一次 OAuth → git clone dynamic-island, venv 装三个 pip 依赖, copy config 改 host port secret → systemd 起 apns-server + cc-tmux 两个 user unit → Tailscale 装 Win 主机不装 WSL, PowerShell netsh portproxy 加 Task Scheduler 登录时重建 → iPhone ccc app 填 Tailscale IP 跟 shared_secret → 四条 curl 全返 ok.
 
 后续问题:
-- log: `~/Opia/dynamic-island/apns-server/push.log` 跟 `push.err.log`
+- log: `~/CcCompanion/apns-server/push.log` 跟 `push.err.log`
 - 改 config 后重启 service: `systemctl --user restart apns-server.service`
 - 看 cc session: `tmux attach -t main`, Ctrl-b d 解 attach 不杀 session
 - 改 portproxy 端口: 改第 7.2 节脚本里的 8795 跟 firewall rule 重跑

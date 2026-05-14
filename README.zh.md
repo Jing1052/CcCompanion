@@ -85,7 +85,7 @@ CcCompanion/
 ├── DISCLAIMER.md                ← Anthropic 商标 disclaimer
 ├── .gitignore                   ← 不入 git 的清单 (secrets / logs / build / 用户数据)
 ├── ios-app/                     ← SwiftUI iOS app (Xcode 工程)
-│   └── OpiaCompanion/           ← Xcode workspace 根; build scheme `CcCompanion`
+│   └── CcCompanion/           ← Xcode workspace 根; build scheme `CcCompanion`
 ├── apns-server/                 ← Python HTTP 服务 (push.py 是入口)
 │   ├── push.py                  ← 主 server
 │   ├── apns_client.py           ← Apple Push 封装
@@ -118,8 +118,8 @@ server 拆成几个独立 `.py`。主要的:
 不想等 TestFlight 也可以直接从源码 build:
 
 ```bash
-cd ios-app/OpiaCompanion
-open OpiaCompanion.xcodeproj
+cd ios-app/CcCompanion
+open CcCompanion.xcodeproj
 # Xcode 里 选 scheme "CcCompanion", configuration "CcRelease",
 #         挑你的签名 team, 接你 iPhone, 按 ⌘R.
 ```
@@ -141,8 +141,8 @@ open OpiaCompanion.xcodeproj
 **问: 8795 端口开到公网安全吗?**
 答: 别。后边挂 Tailscale / ZeroTier / 反向代理上 HTTPS, 加 auth secret。默认 `config.toml` 是 `host = "127.0.0.1"` 是有道理的。
 
-**问: 为啥 Xcode 工程在 `ios-app/OpiaCompanion/` 下?**
-答: 历史原因。这套代码是从一个内部 project OpiaCompanion 拆出来的。TestFlight binary 叫 `CcCompanion` (scheme + bundle id), 但磁盘上的 Xcode 文件夹保留了旧名字。后续 cleanup 会改。
+**问: 为啥 Xcode 工程在 `ios-app/CcCompanion/` 下?**
+答: 这是 CcCompanion 的公开 Xcode 工程。scheme、工程目录和 bundle id 已统一到公开名称。
 
 **问: 怎么更新?**
 答: `git pull`, 然后重 build iOS app, Mac 端重启 `apns-server` LaunchAgent: `launchctl unload ~/Library/LaunchAgents/com.user.apns-server.plist && launchctl load ~/Library/LaunchAgents/com.user.apns-server.plist`。
@@ -158,7 +158,7 @@ issue + PR 都欢迎。我们特别想要的:
 
 提 PR 之前请:
 
-1. 跑 `xcodebuild -project ios-app/OpiaCompanion/OpiaCompanion.xcodeproj -scheme CcCompanion -configuration CcRelease -destination 'generic/platform=iOS' build` 必须 SUCCEEDED。
+1. 跑 `xcodebuild -project ios-app/CcCompanion/CcCompanion.xcodeproj -scheme CcCompanion -configuration CcRelease -destination 'generic/platform=iOS' build` 必须 SUCCEEDED。
 2. 跑 `python3 -m py_compile apns-server/*.py` 不能报错。
 3. secrets / `.p8` / `config.toml` / `tokens/` / `*.jsonl` 不能进 commit (`.gitignore` 已经挡了)。
 

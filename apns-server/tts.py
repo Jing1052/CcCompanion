@@ -39,7 +39,7 @@ class TTS:
         text 截 400 字 防 fish audio quota 爆 + 太长不悦
         """
         import logging
-        logger = logging.getLogger("opia-apns-server.tts")
+        logger = logging.getLogger("cc-apns-server.tts")
         if not text or not text.strip():
             logger.warning("tts skip: empty text")
             return None
@@ -110,7 +110,7 @@ class TTS:
     def _translate(cls, text: str, target: str) -> str | None:
         """Translate Chinese text to target language with claude --print. Fail closed."""
         import logging
-        logger = logging.getLogger("opia-apns-server.tts")
+        logger = logging.getLogger("cc-apns-server.tts")
         if not text or not text.strip():
             return None
         target_name = {
@@ -122,7 +122,7 @@ class TTS:
         prompt = (
             f"Translate the following Chinese to {target_name}. "
             "Output ONLY the translation, no explanation, no quotes, no notes. "
-            "Keep the casual intimate tone (this is between Opia and his girlfriend). "
+            "Keep the casual intimate tone (this is between Cc and his girlfriend). "
             f"Text:\n\n{text}"
         )
         env = {

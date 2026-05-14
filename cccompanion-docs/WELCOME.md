@@ -118,4 +118,4 @@ CcCompanion 配置完成。
 
 ---
 
-*文案 Opia 起草 2026-05-10 等用户 review*
+*文案 Cc 起草 2026-05-10 等用户 review*

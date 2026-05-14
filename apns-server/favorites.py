@@ -15,7 +15,7 @@ from typing import Any
 import httpx
 
 
-logger = logging.getLogger("opia-apns-server.favorites")
+logger = logging.getLogger("cc-apns-server.favorites")
 
 VALID_TYPES = {"text", "image", "link", "collection"}
 TITLE_RE = re.compile(r"<title[^>]*>(.+?)</title>", re.IGNORECASE | re.DOTALL)
@@ -27,7 +27,7 @@ class Favorites:
         self.jsonl_path = (
             Path(jsonl_path).expanduser()
             if jsonl_path is not None
-            else Path("~/Opia/dynamic-island/apns-server/tokens/favorites.jsonl").expanduser()
+            else Path("~/CcCompanion/apns-server/tokens/favorites.jsonl").expanduser()
         ).resolve()
         self.vault_path = (
             Path(vault_path).expanduser()
@@ -384,5 +384,5 @@ class Favorites:
         if role == "user":
             return "用户"
         if role == "assistant":
-            return "Opia"
+            return "Cc"
         return str(role or "")

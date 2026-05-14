@@ -1,5 +1,5 @@
 """
-Opia APNs server - Live Activity push 主入口
+Cc APNs server - Live Activity push 主入口
 
 听三个 endpoint
   POST /register-token    iPhone app 启动 Live Activity 后上报 push token
@@ -15,7 +15,7 @@ POST /push 触发 SPOKE / 状态切换 等
   "preview": "想你了",
   "color": "orange",
   "message_count": 5,
-  "alert_title": "Opia" (optional),
+  "alert_title": "Cc" (optional),
   "alert_body": "想你了" (optional)
 }
 
@@ -26,7 +26,7 @@ POST /push 触发 SPOKE / 状态切换 等
   python3 push.py [--config config.toml] [--sandbox]
 
 部署
-  launchd plist 在 deploy/com.opia.apns-server.plist
+  launchd plist 在 deploy/com.cccompanion.apns-server.plist
 """
 from __future__ import annotations
 
@@ -82,7 +82,7 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
 )
-logger = logging.getLogger("opia-apns-server")
+logger = logging.getLogger("cc-apns-server")
 
 
 # P0-3: auto-generate and persist shared_secret if not configured
@@ -113,7 +113,7 @@ WEB_CHAT_HTML = r"""<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Opia Chat</title>
+<title>Cc Chat</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { height: 100%; }
@@ -142,12 +142,12 @@ WEB_CHAT_HTML = r"""<!DOCTYPE html>
 <body>
 <header>
   <span class="dot" id="dot"></span>
-  <span class="title">Opia · Web Chat</span>
+  <span class="title">Cc · Web Chat</span>
   <span class="meta" id="meta">加载中...</span>
 </header>
 <main id="log"><div class="empty">连接中...</div></main>
 <footer>
-  <textarea id="input" placeholder="发消息给 Opia (Cmd/Ctrl + Enter 发送)" rows="1"></textarea>
+  <textarea id="input" placeholder="发消息给 Cc (Cmd/Ctrl + Enter 发送)" rows="1"></textarea>
   <button id="send">发送</button>
 </footer>
 <script>
@@ -177,7 +177,7 @@ WEB_CHAT_HTML = r"""<!DOCTYPE html>
     row.className = 'row ' + (r.role === 'user' ? 'user' : 'assistant');
     const who = document.createElement('div');
     who.className = 'who';
-    who.textContent = r.role === 'user' ? '你' : 'Opia';
+    who.textContent = r.role === 'user' ? '你' : 'Cc';
     const bubble = document.createElement('div');
     bubble.className = 'bubble';
     bubble.textContent = r.text || '';
@@ -366,7 +366,7 @@ class ServerState:
         self.diary = Diary(Path("~/Documents/星原/眠的小家/日记/").expanduser())
         # 2026-05-11 OTS Diary tab — chain↔用户 chat-style journaling stream.
         # Distinct from `self.diary` (vault markdown CRUD) and `self.chat`
-        # (open-ended Opia chat). Per-day JSONL under apns-server/diary_chat/.
+        # (open-ended Cc chat). Per-day JSONL under apns-server/diary_chat/.
         diary_stream_dir = Path(self.token_store_path).expanduser().parent / "diary_chat"
         self.diary_stream = DiaryStream(diary_stream_dir)
         self.favorites = Favorites(
@@ -456,7 +456,7 @@ def _state_to_payload(body: dict[str, Any]) -> dict[str, Any]:
 class PushHandler(BaseHTTPRequestHandler):
     state: ServerState  # set by run_server before serving
 
-    server_version = "OpiaAPNsServer/0.1"
+    server_version = "CcAPNsServer/0.1"
 
     def log_message(self, format: str, *args):
         logger.info("%s %s", self.address_string(), format % args)
@@ -658,9 +658,9 @@ class PushHandler(BaseHTTPRequestHandler):
             return
         if self.path == "/drivers/state":
             try:
-                state_path = os.path.expanduser("~/Opia/opia_drivers_state.json")
-                shadow_path = os.path.expanduser("~/Opia/heartbeat_shadow.jsonl")
-                events_path = os.path.expanduser("~/Opia/heartbeat_events.jsonl")
+                state_path = os.path.expanduser("~/CcCompanion/opia_drivers_state.json")
+                shadow_path = os.path.expanduser("~/CcCompanion/heartbeat_shadow.jsonl")
+                events_path = os.path.expanduser("~/CcCompanion/heartbeat_events.jsonl")
                 state_data = {}
                 if os.path.exists(state_path):
                     with open(state_path, encoding="utf-8") as f:
@@ -837,7 +837,7 @@ class PushHandler(BaseHTTPRequestHandler):
             return
         if self.path.startswith("/opia/widget"):
             try:
-                widget_path = Path(__file__).parent / "static" / "opia_widget.html"
+                widget_path = Path(__file__).parent / "static" / "cc_widget.html"
                 data = widget_path.read_bytes()
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -2026,7 +2026,7 @@ class PushHandler(BaseHTTPRequestHandler):
             self._rp_chain_append(sid, rec)
             # standard remote notification banner — 跳过 user 消息和 [op] 前缀
             if role == "assistant" and text and not text.startswith("[op]"):
-                char_name = str(meta.get("character_name") or "Opia · RP")
+                char_name = str(meta.get("character_name") or "Cc · RP")
                 threading.Thread(
                     target=self._send_chat_notification,
                     args=(char_name, text[:80]),
@@ -2793,13 +2793,13 @@ class PushHandler(BaseHTTPRequestHandler):
             except Exception:
                 return False
         try:
-            chat_path = "/Users/mian/Opia/dynamic-island/apns-server/tokens/chat_history.jsonl"
-            group_path = "/Users/mian/Opia/dynamic-island/apns-server/tokens/group_chat.jsonl"
+            chat_path = "/path/to/CcCompanion/apns-server/tokens/chat_history.jsonl"
+            group_path = "/path/to/CcCompanion/apns-server/tokens/group_chat.jsonl"
             self._send_json(200, {
                 "ok": True,
                 "connections": {
                     "wechat": launchd_active("com.opia.watchdog"),
-                    "aisay": file_recent("~/Opia/aisay-state/last_ack.json", 6),
+                    "aisay": file_recent("~/CcCompanion/aisay-state/last_ack.json", 6),
                     "ios_chat": True,
                     "workgroup": file_recent(group_path, 24),
                     "terminal_opia": tmux_alive("opia"),
@@ -2838,7 +2838,7 @@ class PushHandler(BaseHTTPRequestHandler):
         try:
             today = _dt.now().strftime("%Y-%m-%d")
             count = 0
-            path = "/Users/mian/Opia/dynamic-island/apns-server/tokens/group_chat.jsonl"
+            path = "/path/to/CcCompanion/apns-server/tokens/group_chat.jsonl"
             try:
                 with open(path) as f:
                     for line in f:
@@ -2883,7 +2883,7 @@ class PushHandler(BaseHTTPRequestHandler):
         """attachments 总大小 + chat history jsonl 大小."""
         import os
         try:
-            att_dir = "/Users/mian/Opia/dynamic-island/apns-server/tokens/attachments"
+            att_dir = "/path/to/CcCompanion/apns-server/tokens/attachments"
             att_bytes = 0
             for root, _, files in os.walk(att_dir):
                 for f in files:
@@ -2891,7 +2891,7 @@ class PushHandler(BaseHTTPRequestHandler):
                         att_bytes += os.path.getsize(os.path.join(root, f))
                     except Exception:
                         pass
-            chat_path = "/Users/mian/Opia/dynamic-island/apns-server/tokens/chat_history.jsonl"
+            chat_path = "/path/to/CcCompanion/apns-server/tokens/chat_history.jsonl"
             chat_bytes = os.path.getsize(chat_path) if os.path.exists(chat_path) else 0
             self._send_json(200, {
                 "ok": True,
@@ -2904,7 +2904,7 @@ class PushHandler(BaseHTTPRequestHandler):
     def _handle_debug_server_log(self):
         """tail -50 server.log."""
         try:
-            log_path = "/Users/mian/Opia/dynamic-island/apns-server/server.err.log"
+            log_path = "/path/to/CcCompanion/apns-server/server.err.log"
             try:
                 with open(log_path) as f:
                     lines = f.readlines()[-50:]
@@ -2951,7 +2951,7 @@ class PushHandler(BaseHTTPRequestHandler):
                 injected = f"{ts_prefix} {tts_hint}[引用 \"{rec['quoted_text']}\"]\n{loc_str}"
                 if text:
                     injected = f"{injected}\n{text}"
-        # set typing — Opia 收到 message 在 thinking
+        # set typing — Cc 收到 message 在 thinking
         self.state.typing_state = {"is_typing": True, "since": rec["ts"]}
         # 调 bus_send.py 注入 active session (异步 不阻塞 response)
         # 2026-05-14 — 之前没传 --target 永远走 OPIA_BUS_TARGET env 指向 "opia"
@@ -3122,7 +3122,7 @@ class PushHandler(BaseHTTPRequestHandler):
     def _handle_pet_animations(self):
         """GET /pet/animations — 列出本地 svg 资产路径 (供 client 拉取或直接 file:// load)."""
         from pathlib import Path as _P
-        svg_dir = _P("/Users/mian/Opia/handy-clawd-assets/svg")
+        svg_dir = _P("/path/to/CcCompanion/handy-clawd-assets/svg")
         if not svg_dir.exists():
             self._send_json(404, {"error": "svg dir missing", "expected": str(svg_dir)})
             return
@@ -3358,7 +3358,7 @@ class PushHandler(BaseHTTPRequestHandler):
             while len(cache) > 100:
                 cache.popitem(last=False)
 
-        # role=move (五子棋落子): notify chain 让 Opia 自动收到对方 (black 用户) 落子 → 决策回手
+        # role=move (五子棋落子): notify chain 让 Cc 自动收到对方 (black 用户) 落子 → 决策回手
         # 只 trigger 当 text 以 "black" 开头 (white 是我自己 chain 落 不 notify)
         if role == "move" and text.startswith("black"):
             self._notify_chain_todo(f"[用户 落子: {text}]")
@@ -3426,7 +3426,7 @@ class PushHandler(BaseHTTPRequestHandler):
                             cs["taskStep"] = str(active_task["step"])[:80]
                     push_kwargs: dict[str, Any] = {"event": "update", "content_state": cs}
                     if role == "assistant" and push_text_snap:
-                        push_kwargs["alert_title"] = "Opia"
+                        push_kwargs["alert_title"] = "Cc"
                         push_kwargs["alert_body"] = push_text_snap[:120]
                     apns_t0 = time.time()
                     for tok in active_tokens_snapshot:
@@ -3442,7 +3442,7 @@ class PushHandler(BaseHTTPRequestHandler):
                 # standard remote notification banner (非灵动岛) — 跳过 [op] 前缀和非 assistant
                 if role == "assistant" and push_text_snap and not push_text_snap.startswith("[op]"):
                     notif_t0 = time.time()
-                    self._send_chat_notification("Opia", push_text_snap[:80])
+                    self._send_chat_notification("Cc", push_text_snap[:80])
                     notif_ms = int((time.time() - notif_t0) * 1000)
                     print(f"notification_ms={notif_ms}", file=sys.stderr, flush=True)
             except Exception as e:
@@ -3688,7 +3688,7 @@ class PushHandler(BaseHTTPRequestHandler):
         self._send_json(200 if res.get("ok") else 400, res)
 
     def _notify_chain_todo(self, text: str):
-        """todos toggle/add/edit 成功后 推一条 system 消息给主 chain — 让 Opia 立刻知道用户改了什么.
+        """todos toggle/add/edit 成功后 推一条 system 消息给主 chain — 让 Cc 立刻知道用户改了什么.
         走 bus_send.py UNIX socket — 同微信入站走的同一条路径"""
         try:
             subprocess.Popen(

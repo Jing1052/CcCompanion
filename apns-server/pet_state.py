@@ -1,6 +1,6 @@
 """Handy-Clawd pet 状态 store + SSE bus.
 
-用户 5-8 push 桌面小宠物方案. 单只 pet 代表 Opia (Claude Opus 4.7).
+用户 5-8 push 桌面小宠物方案. 单只 pet 代表 Cc (Claude Opus 4.7).
 
 12 状态 (clawd-on-desk 同款): idle / thinking / typing / building / juggling /
 conducting / error / happy / notification / sweeping / carrying / sleeping.
@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any
 
 
-logger = logging.getLogger("opia-apns-server.pet_state")
+logger = logging.getLogger("cc-apns-server.pet_state")
 
 VALID_STATES = {
     "idle", "thinking", "typing", "building", "juggling", "conducting",

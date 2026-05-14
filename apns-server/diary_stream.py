@@ -6,7 +6,7 @@ ChatHistory's shape (ts / role / text / source) so existing iOS bubble
 code can render them without translation.
 
 Distinct from `diary.py` (which manages markdown vault entries) and from
-`chat_history.py` (which is the open-ended Opia chat). This is the chain↔
+`chat_history.py` (which is the open-ended Cc chat). This is the chain↔
 用户 journaling stream: chain posts probing questions as role=assistant,
 用户 answers as role=user.
 

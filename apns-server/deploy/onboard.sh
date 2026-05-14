@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Opia APNs server onboarding
+# Cc APNs server onboarding
 # 阿眠拿到 .p8 + 4 件后 一条命令完成 Step 2
 #
 # 用法:
 #   ./onboard.sh --p8 ~/Downloads/AuthKey_ABC1234567.p8 \
 #                --team-id DEF7654321 \
 #                --key-id  ABC1234567 \
-#                [--bundle-id com.starryfield.OpiaCompanion]
+#                [--bundle-id com.starryfield.CcCompanion]
 #
 # 做的事:
 #   1 validate 输入
@@ -25,15 +25,15 @@ SECRETS_DIR="$ROOT/secrets"
 CONFIG_PATH="$ROOT/config.toml"
 EXAMPLE_PATH="$ROOT/config.example.toml"
 VENV_DIR="$ROOT/.venv"
-PLIST_SRC="$ROOT/deploy/com.opia.apns-server.plist"
-PLIST_DST="$HOME/Library/LaunchAgents/com.opia.apns-server.plist"
-LABEL="com.opia.apns-server"
+PLIST_SRC="$ROOT/deploy/com.cccompanion.apns-server.plist"
+PLIST_DST="$HOME/Library/LaunchAgents/com.cccompanion.apns-server.plist"
+LABEL="com.cccompanion.apns-server"
 HEALTH_URL="http://127.0.0.1:8795/health"
 
 P8=""
 TEAM_ID=""
 KEY_ID=""
-BUNDLE_ID="com.starryfield.OpiaCompanion"
+BUNDLE_ID="com.starryfield.CcCompanion"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -124,4 +124,4 @@ echo "==> 全部完成"
 echo "    server: $HEALTH_URL"
 echo "    日志:   tail -f $ROOT/server.log"
 echo "    err:    tail -f $ROOT/server.err.log"
-echo "    test push: ~/scripts/opia_push_to_phone.sh spoke '想你了' orange"
+echo "    test push: ~/scripts/cc_push_to_phone.sh spoke '想你了' orange"

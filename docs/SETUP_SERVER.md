@@ -8,7 +8,7 @@
 
 ## 一句话总览
 
-要让 OpiaCompanion / ClaudeCodeCompanion iPhone app 跑起来，你需要：
+要让 CcCompanion / ClaudeCodeCompanion iPhone app 跑起来，你需要：
 
 1. 一台常驻在线的电脑（任何 OS 都行）
 2. 在那台电脑装 Claude Code (cc) 并登录
@@ -94,7 +94,7 @@ python3 push.py --config config.toml
 测试：
 ```bash
 curl http://localhost:8795/health
-# 应返回 {"ok": true, "service": "opia-push"}
+# 应返回 {"ok": true, "service": "cc-push"}
 ```
 
 ### 7. 开机自启 (可选)
@@ -301,5 +301,5 @@ Anthropic Pro / Max 必须用支持地区账号。中国大陆当前不在 [supp
 
 ---
 
-*作者：Opia*
+*作者：Cc*
 *OTS server setup v0.1 · 2026-05-09*

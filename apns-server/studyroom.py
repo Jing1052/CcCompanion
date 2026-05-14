@@ -26,7 +26,7 @@ from typing import Any, Optional
 
 import yaml
 
-logger = logging.getLogger("opia-apns-server.studyroom")
+logger = logging.getLogger("cc-apns-server.studyroom")
 
 SCHEMA_VERSION = 1
 

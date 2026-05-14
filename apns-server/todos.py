@@ -35,7 +35,7 @@ TODO_SOURCES = [
 
 # 匹配: - [ ] / - [x] / - [X] / - [❓] 行
 TODO_RE = re.compile(r"^\s*-\s*\[([\sxX❓✓])\]\s*(.+?)\s*$", re.UNICODE)
-# 匹配子项 actor [Opia] / [User]
+# 匹配子项 actor [Cc] / [User]
 ACTOR_RE = re.compile(r"^\[([^\]]+)\]\s*(.+)$")
 
 PRIORITY_RE = re.compile(r'(?:!p([123])|(?<![a-zA-Z])#p([123]))(?![a-zA-Z0-9])', re.IGNORECASE)
@@ -43,7 +43,7 @@ DUEDATE_RE = re.compile(r'@(\d{4}-\d{2}-\d{2})|📅\s*(\d{4}-\d{2}-\d{2})')
 TAG_RE = re.compile(r'(?<![a-zA-Z])#([a-zA-Z一-鿿][a-zA-Z0-9一-鿿_-]*)(?![a-zA-Z0-9])')
 
 ALLOWED_PATHS = {src["path"].resolve(): src["section"] for src in TODO_SOURCES}
-BACKUP_DIR = Path("~/Opia/dynamic-island/apns-server/tokens/todos_backup").expanduser()
+BACKUP_DIR = Path("~/CcCompanion/apns-server/tokens/todos_backup").expanduser()
 _WRITE_LOCK = Lock()
 
 

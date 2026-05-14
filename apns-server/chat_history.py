@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Any
 
 
-logger = logging.getLogger("opia-apns-server.chat_history")
+logger = logging.getLogger("cc-apns-server.chat_history")
 
 
 class EphemeralTaskBuffer:

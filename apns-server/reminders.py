@@ -1,5 +1,5 @@
 """
-Opia reminder store — 模型给自己的定时唤醒队列
+Cc reminder store — 模型给自己的定时唤醒队列
 
 数据格式 (jsonl 每行一条):
 {

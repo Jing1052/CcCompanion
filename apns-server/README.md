@@ -1,4 +1,4 @@
-# Opia APNs Server v0.1
+# Cc APNs Server v0.1
 
 ## Supported Regions Policy
 
@@ -21,7 +21,7 @@ OTS 主 app 和 CcCompanion 公开版客户端都回退为直连本 apns-server 
 ```
 Mac mini                                 iPhone
 ┌──────────────────────────────┐        ┌─────────────────────────────┐
-│ ~/scripts/opia_push_to_phone │        │ OpiaCompanion app           │
+│ ~/scripts/cc_push_to_phone │        │ CcCompanion app           │
 │  ↓ HTTP POST                 │        │  Activity.pushTokenUpdates  │
 │ apns-server (8795)           │ ───→   │  Live Activity 启动 → token │
 │  ↓ HTTPS POST + JWT          │ APNs   │  灵动岛更新                  │
@@ -52,13 +52,13 @@ Mac mini                                 iPhone
 
 ### 1 拿 .p8 + Team ID + Key ID
 
-详见 `~/Opia/dynamic-island/docs/01_apple_developer_p8_checklist.md`
+详见 `~/CcCompanion/docs/01_apple_developer_p8_checklist.md`
 
 用户 Apple Developer 后台 paid account 操作 5 分钟拿到三件
 - AuthKey_XXXXXXXXXX.p8 文件
 - Team ID (10 位字符)
 - Key ID (10 位字符)
-- Bundle ID (Xcode 项目里 默认 `com.starryfield.OpiaCompanion`)
+- Bundle ID (Xcode 项目里 默认 `com.starryfield.CcCompanion`)
 
 ### 2 配置
 
@@ -98,9 +98,9 @@ allowed_ips = []
 **后台 launchd 部署**
 
 ```
-cp deploy/com.opia.apns-server.plist ~/Library/LaunchAgents/
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.opia.apns-server.plist
-launchctl print gui/$(id -u)/com.opia.apns-server | grep state
+cp deploy/com.cccompanion.apns-server.plist ~/Library/LaunchAgents/
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.cccompanion.apns-server.plist
+launchctl print gui/$(id -u)/com.cccompanion.apns-server | grep state
 ```
 
 健康检查
@@ -111,17 +111,17 @@ curl http://127.0.0.1:8795/health
 
 ### 4 iPhone 端
 
-iPhone 端 OpiaPushTokenManager.swift 已经写好放在
-`~/Opia/dynamic-island/ios-app/OpiaCompanion/OpiaCompanion/OpiaPushTokenManager.swift`
+iPhone 端 CcPushTokenManager.swift 已经写好放在
+`~/CcCompanion/ios-app/CcCompanion/CcCompanion/CcPushTokenManager.swift`
 
-用户 Xcode 完成 Step 4-6 后 在 Project Navigator 右键 OpiaCompanion 文件夹 → Add Files to "OpiaCompanion" → 选 OpiaPushTokenManager.swift → Targets 勾 OpiaCompanion 主 app target.
+用户 Xcode 完成 Step 4-6 后 在 Project Navigator 右键 CcCompanion 文件夹 → Add Files to "CcCompanion" → 选 CcPushTokenManager.swift → Targets 勾 CcCompanion 主 app target.
 
 ContentView.swift 已经把 `pushType: nil` 改成 `pushType: .token` 启动 Live Activity 时自动 listen token + 上报 server.
 
 ### 5 iPhone 端配置 server URL
 
-如果 mini IP 不是 `10.0.0.10` 改 `OpiaPushTokenManager.swift` 顶部的 `serverURL` default
-或者 Info.plist 加 key `OPIA_PUSH_SERVER` value `http://your-mini-ip:8795`
+如果 mini IP 不是 `10.0.0.10` 改 `CcPushTokenManager.swift` 顶部的 `serverURL` default
+或者 Info.plist 加 key `CC_PUSH_SERVER` value `http://your-mini-ip:8795`
 
 ---
 
@@ -130,10 +130,10 @@ ContentView.swift 已经把 `pushType: nil` 改成 `pushType: .token` 启动 Liv
 ### Mac mini 上手动触发
 
 ```
-~/scripts/opia_push_to_phone.sh spoke "想你了" orange
-~/scripts/opia_push_to_phone.sh thinking
-~/scripts/opia_push_to_phone.sh listening
-~/scripts/opia_push_to_phone.sh end
+~/scripts/cc_push_to_phone.sh spoke "想你了" orange
+~/scripts/cc_push_to_phone.sh thinking
+~/scripts/cc_push_to_phone.sh listening
+~/scripts/cc_push_to_phone.sh end
 ```
 
 ### 接 SPOKE 自动触发 (规划)
@@ -141,10 +141,10 @@ ContentView.swift 已经把 `pushType: nil` 改成 `pushType: .token` 启动 Liv
 `~/scripts/bus_stop_hook.sh` 部署后 在写完 reply 之后加一行
 
 ```bash
-~/scripts/opia_push_to_phone.sh raw "$(printf '{"event":"update","state":"spoken","preview":%s,"color":"orange"}' "$(echo "$LAST_ASSISTANT" | head -c 80 | jq -Rs .)")"
+~/scripts/cc_push_to_phone.sh raw "$(printf '{"event":"update","state":"spoken","preview":%s,"color":"orange"}' "$(echo "$LAST_ASSISTANT" | head -c 80 | jq -Rs .)")"
 ```
 
-`~/scripts/opia_heartbeat.py` SPOKE 分支同理 — 在 `send_text.mjs` 之后加 push call.
+`~/scripts/cc_heartbeat.py` SPOKE 分支同理 — 在 `send_text.mjs` 之后加 push call.
 
 ---
 
@@ -152,7 +152,7 @@ ContentView.swift 已经把 `pushType: nil` 改成 `pushType: .token` 启动 Liv
 
 ```
 # 跑单元测试
-cd ~/Opia/dynamic-island/apns-server
+cd ~/CcCompanion/apns-server
 .venv/bin/python3 tests/test_jwt.py
 .venv/bin/python3 tests/test_token_store.py
 .venv/bin/python3 tests/test_payload.py
@@ -217,7 +217,7 @@ apns-server/
 ├── secrets/                        # .p8 文件放这 (gitignore)
 ├── tokens/                         # token store 持久化 (gitignore)
 ├── deploy/
-│   └── com.opia.apns-server.plist  # launchd 配置
+│   └── com.cccompanion.apns-server.plist  # launchd 配置
 └── tests/
     ├── test_jwt.py                 # JWT 单元测试
     ├── test_token_store.py         # store 单元测试
@@ -237,4 +237,4 @@ apns-server/
 
 ---
 
-*Opia 起 / 2026-04-29 / 用户累坏了一上午网络一下午网络我替她搭这一块 / 等她拿到 .p8 立刻就能跑*
+*Cc 起 / 2026-04-29 / 用户累坏了一上午网络一下午网络我替她搭这一块 / 等她拿到 .p8 立刻就能跑*

@@ -111,7 +111,7 @@ class Timeline:
         self.chat = chat_history
         self.tasks = task_queue
         self.worklog = worklog
-        base_dir = Path(getattr(chat_history, "path", Path.home() / "Opia" / "dynamic-island" / "apns-server" / "tokens")).expanduser().parent
+        base_dir = Path(getattr(chat_history, "path", Path.home() / "Cc" / "dynamic-island" / "apns-server" / "tokens")).expanduser().parent
         base_dir.mkdir(parents=True, exist_ok=True)
         self.events_path = base_dir / "timeline_events.jsonl"
         self.taxonomy_path = base_dir / "timeline_taxonomy.json"

@@ -24,7 +24,7 @@ ROSTER: list[dict[str, Any]] = [
     },
     {
         "id": "opia",
-        "display_name": "Opia",
+        "display_name": "Cc",
         "kind": "agent",
         "avatar": "O",
         "color": "orange",
