@@ -2016,7 +2016,7 @@ final class ChatViewModel: ObservableObject {
         guard let cmd = parts.first else { return false }
         switch cmd {
         case "/clear":
-            clearAllLocalMessages()
+            await handleSlashClear()
             return true
         case "/help":
             appendCommandReply(slashHelpText())
@@ -2057,7 +2057,7 @@ final class ChatViewModel: ObservableObject {
         /list 列出当前活跃 session
         /switch <sid> 切到指定 session (例 /switch bao)
         /stop 中断当前回复
-        /clear 清空本地消息缓存
+        /clear 清空当前 session chain 上下文 (cc 内部 /clear)
         /help 显示这份说明
         /compact 压缩当前 chain 上下文 (cc 内部 /compact)
         """
@@ -2178,6 +2178,26 @@ final class ChatViewModel: ObservableObject {
         }
     }
 
+    private func handleSlashClear() async {
+        let activeSid = await fetchActiveSid()
+        guard let req = slashAuthedRequest(path: "chain/clear", jsonBody: ["session": activeSid]) else {
+            appendCommandReply("/clear 失败 server URL 没配")
+            return
+        }
+        do {
+            let (data, response) = try await session.data(for: req)
+            let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+            if status == 200 {
+                appendCommandReply("已清空 \(activeSid) chain 上下文")
+                return
+            }
+            let message = serverErrorMessage(from: data) ?? "HTTP \(status)"
+            appendCommandReply("/clear 失败 \(message)")
+        } catch {
+            appendCommandReply("/clear 失败 \(error.localizedDescription)")
+        }
+    }
+
     private func handleSlashStop() async {
         let activeSid = await fetchActiveSid()
         await abortChain(session: activeSid)
@@ -2202,6 +2222,15 @@ final class ChatViewModel: ObservableObject {
             // 拿不到 active sid 兜底 cc
         }
         return "cc"
+    }
+
+    private func serverErrorMessage(from data: Data) -> String? {
+        if let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let err = obj["error"] as? String, !err.isEmpty {
+            return err
+        }
+        let body = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return body?.isEmpty == false ? body : nil
     }
 
     // 2026-05-14 build 196 — /switch <sid> 切 active tmux session
@@ -2850,7 +2879,7 @@ struct ChatView: View {
                 vm.clearAllLocalMessages()
             }
         } message: {
-            Text("只清本地缓存。服务端 chat_history.jsonl 不动，下次拉历史还会带回来。等同于 /clear 斜杠命令。")
+            Text("只清本地 GRDB 缓存。服务端 chat_history.jsonl 不动，下次拉历史还会带回来。跟 /clear chain 上下文清空不同。")
         }
         .navigationTitle("")
         #if os(iOS)

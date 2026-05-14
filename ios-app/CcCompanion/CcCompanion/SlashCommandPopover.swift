@@ -33,7 +33,7 @@ extension SlashCommand {
         .init(name: "/stop",    description: "中断当前回复",                 usage: "/stop"),
         .init(name: "/list",    description: "列出所有 session",             usage: "/list"),
         .init(name: "/switch",  description: "切换到指定 session",           usage: "/switch <sid>"),
-        .init(name: "/clear",   description: "清空本地消息",                 usage: "/clear"),
+        .init(name: "/clear",   description: "清空对话上下文",               usage: "/clear"),
         .init(name: "/help",    description: "显示所有命令",                 usage: "/help"),
         .init(name: "/compact", description: "压缩 chain 历史 (forge-reload)", usage: "/compact"),
     ]
