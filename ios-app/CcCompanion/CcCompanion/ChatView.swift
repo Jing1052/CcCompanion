@@ -1582,13 +1582,19 @@ final class ChatViewModel: ObservableObject {
         }
         return false
     }
-    func abortChain(session sessionName: String = "cc") async {
-        print("[Cc abort] sending /chain/abort POST session=\(sessionName)")
+    func abortChain(session sessionName: String? = nil) async {
+        let resolvedSession: String
+        if let sessionName, !sessionName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            resolvedSession = sessionName
+        } else {
+            resolvedSession = await fetchActiveSid()
+        }
+        print("[Cc abort] sending /chain/abort POST session=\(resolvedSession)")
         let url = CcServerConfig.serverURL.appendingPathComponent("chain/abort")
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.httpBody = try? JSONSerialization.data(withJSONObject: ["session": sessionName])
+        req.httpBody = try? JSONSerialization.data(withJSONObject: ["session": resolvedSession])
         do {
             let (data, response) = try await self.session.data(for: req)
             let status = (response as? HTTPURLResponse)?.statusCode ?? -1
@@ -2206,7 +2212,7 @@ final class ChatViewModel: ObservableObject {
 
     private func fetchActiveSid() async -> String {
         guard let req = slashAuthedRequest(path: "chain/sessions", method: "GET") else {
-            return "cc"
+            return await CcServerConfig.fetchDefaultSession(using: session)
         }
         do {
             let (data, _) = try await session.data(for: req)
@@ -2219,9 +2225,9 @@ final class ChatViewModel: ObservableObject {
                 }
             }
         } catch {
-            // 拿不到 active sid 兜底 cc
+            // 拿不到 active sid 兜底 server default.
         }
-        return "cc"
+        return await CcServerConfig.fetchDefaultSession(using: session)
     }
 
     private func serverErrorMessage(from data: Data) -> String? {
