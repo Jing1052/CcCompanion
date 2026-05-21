@@ -261,21 +261,27 @@ struct TerminalView: View {
                 Circle().fill(Color(red: 1.0, green: 0.74, blue: 0.18)).frame(width: 10, height: 10)
                 Circle().fill(Color(red: 0.27, green: 0.85, blue: 0.39)).frame(width: 10, height: 10)
                 Spacer().frame(width: 4)
-                ForEach(vm.sessions.isEmpty ? [vm.session] : vm.sessions, id: \.self) { s in
-                    Button {
-                        vm.session = s
-                        Task { await vm.fetchCapture() }
-                    } label: {
-                        Text(s)
-                            .font(.system(size: 11, design: .monospaced).weight(s == vm.session ? .semibold : .regular))
-                            .foregroundStyle(s == vm.session ? Color.white : Color.ccTextDim)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 3)
-                            .background(s == vm.session ? Color.ccAccent : Color.clear)
-                            .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                // session 标签横向滚动 防 session 多时 SwiftUI 把 Text 压成竖排
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(vm.sessions.isEmpty ? [vm.session] : vm.sessions, id: \.self) { s in
+                            Button {
+                                vm.session = s
+                                Task { await vm.fetchCapture() }
+                            } label: {
+                                Text(s)
+                                    .font(.system(size: 11, design: .monospaced).weight(s == vm.session ? .semibold : .regular))
+                                    .foregroundStyle(s == vm.session ? Color.white : Color.ccTextDim)
+                                    .lineLimit(1)
+                                    .fixedSize(horizontal: true, vertical: false)
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 3)
+                                    .background(s == vm.session ? Color.ccAccent : Color.clear)
+                                    .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                            }
+                        }
                     }
                 }
-                Spacer()
                 Text(vm.content.isEmpty ? "" : "\(vm.content.split(separator: "\n").count) lines")
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundStyle(Color.ccTextDim)
