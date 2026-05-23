@@ -25,6 +25,7 @@ The whole thing is **local-first** — your messages never go through our server
 - **Terminal** — inline view of the `tmux` session running `claude` on your Mac. Tap to expand. Useful for "what did claude just do?" without unlocking the Mac.
 - **Slash commands** — `/new`, `/list`, `/switch <sid>`, `/stop`, `/compact`, `/clear`, `/help`. Multi-session aware.
 - **Multi-endpoint** — chain multiple server URLs (Tailscale `100.x` + LAN `10.x` + localhost) with auto-fallback ping. Travel between networks, the app picks the live one.
+- **Polling local notifications**: when polling receives a new assistant message, the app can fire a local iOS notification for glasses and other accessories that only mirror local notifications. This is on by default and can be disabled in Settings.
 - **Onboarding wizard** — 6-step setup on first launch (server URL + secret + avatars + name + ping test).
 - **Theme** — light / dark / warm, optionally follow system.
 - **Privacy** — server `config.toml` is `.gitignore`-d, `.p8` keys live in `apns-server/secrets/` (also ignored). The repo ships with `config.example.toml` only.

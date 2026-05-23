@@ -12,6 +12,7 @@ import SwiftUI
 import Foundation
 import Combine
 import AudioToolbox
+import UserNotifications
 #if canImport(PhotosUI)
 import PhotosUI
 #endif
@@ -547,6 +548,8 @@ enum ChatRowItem: Identifiable, Hashable {
 
 @MainActor
 final class ChatViewModel: ObservableObject {
+    static let pollingAssistantNotificationIdentifierPrefix = "polling-assistant-"
+
     @Published var messages: [ChatMessage] = [] {
         didSet {
             // 仅末尾 append 1 条 + 同 day + < 30min gap → incremental append
@@ -904,6 +907,9 @@ final class ChatViewModel: ObservableObject {
     private var settingsEtag: String? = nil
     private var pollingFailureCount: Int = 0
     private var appIsActive: Bool = true
+    private var notifyOnPollingAssistant: Bool {
+        UserDefaults.standard.object(forKey: "notify_on_polling_assistant") as? Bool ?? true
+    }
     let chatStore = ChatStore.shared
     private let session: URLSession = {
         let cfg = URLSessionConfiguration.default
@@ -970,8 +976,10 @@ final class ChatViewModel: ObservableObject {
                 taskSoundEnabled = values["task_sound_enabled"] ?? taskSoundEnabled
             }
             if !response.chat.newRecords.isEmpty {
+                let existingIds = Set(messages.map(\.id))
                 chatStore.upsert(response.chat.newRecords)
                 mergeUnique(response.chat.newRecords)
+                notifyPollingAssistantMessages(response.chat.newRecords, existingIds: existingIds)
                 reconcileLocalSendState()
                 await refreshRecent()
                 lastError = nil
@@ -983,6 +991,64 @@ final class ChatViewModel: ObservableObject {
             pollingFailureCount += 1
             objectWillChange.send()
         }
+    }
+
+    private func notifyPollingAssistantMessages(_ records: [ChatMessage], existingIds: Set<String>) {
+        guard notifyOnPollingAssistant else { return }
+        for record in records
+        where record.role == "assistant"
+            && record.localId == nil
+            && !existingIds.contains(record.id)
+            && !record.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            firePollingAssistantNotification(for: record)
+        }
+    }
+
+    private func firePollingAssistantNotification(for message: ChatMessage) {
+        let content = UNMutableNotificationContent()
+        content.title = pollingAssistantNotificationTitle()
+        content.body = Self.notificationBody(from: message.text)
+        content.sound = .default
+        content.threadIdentifier = pollingAssistantThreadIdentifier()
+        content.userInfo = [
+            "source": "polling_assistant",
+            "message_ts": message.ts,
+        ]
+
+        let request = UNNotificationRequest(
+            identifier: Self.pollingAssistantNotificationIdentifierPrefix + message.id,
+            content: content,
+            trigger: nil
+        )
+        UNUserNotificationCenter.current().add(request) { error in
+            if let error {
+                print("[PollingNotification] add failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    private func pollingAssistantNotificationTitle() -> String {
+        let name = UserDefaults.standard.string(forKey: "ai_name")?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return name.isEmpty ? "Opia" : name
+    }
+
+    private func pollingAssistantThreadIdentifier() -> String {
+        let storedProfileId = UserDefaults.standard.string(forKey: "ai_profile_id")?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !storedProfileId.isEmpty {
+            return "assistant.\(storedProfileId)"
+        }
+        let title = pollingAssistantNotificationTitle()
+            .lowercased()
+            .filter { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" }
+        return title.isEmpty ? "assistant.opia" : "assistant.\(title)"
+    }
+
+    private static func notificationBody(from text: String) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count > 80 else { return trimmed }
+        return String(trimmed.prefix(80)) + "..."
     }
 
     private func fetchSoundSettings() async {

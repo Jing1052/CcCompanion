@@ -55,6 +55,10 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
+        if notification.request.identifier.hasPrefix(ChatViewModel.pollingAssistantNotificationIdentifierPrefix) {
+            completionHandler([.banner, .list, .sound, .badge])
+            return
+        }
         // build 93: 应用前台不弹 banner / 不响声 静默进通知中心 (badge 仍更新)
         completionHandler([.list, .badge])
     }
