@@ -10,6 +10,10 @@
 import SwiftUI
 import Foundation
 import Combine
+import AudioToolbox
+#if canImport(UIKit)
+import UIKit
+#endif
 
 @MainActor
 final class TerminalViewModel: ObservableObject {
@@ -21,6 +25,8 @@ final class TerminalViewModel: ObservableObject {
     @Published var lastError: String? = nil
 
     private var pollingTask: Task<Void, Never>? = nil
+    private var lastDecisionTriggerAt: Date? = nil
+    private var lastDecisionPromptSignature: String? = nil
     private let urlSession: URLSession = {
         let cfg = URLSessionConfiguration.default
         cfg.timeoutIntervalForRequest = 6
@@ -79,6 +85,7 @@ final class TerminalViewModel: ObservableObject {
             if let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any],
                let txt = obj["content"] as? String {
                 self.content = txt
+                maybeTriggerDecisionFeedback(for: txt)
                 self.lastError = nil
             } else if let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any],
                       let err = obj["error"] as? String {
@@ -87,6 +94,83 @@ final class TerminalViewModel: ObservableObject {
         } catch {
             // 网络抖动静默
         }
+    }
+
+    private var decisionFeedbackEnabled: Bool {
+        if UserDefaults.standard.object(forKey: "enable_decision_haptic") == nil {
+            return true
+        }
+        return UserDefaults.standard.bool(forKey: "enable_decision_haptic")
+    }
+
+    private func maybeTriggerDecisionFeedback(for text: String) {
+        guard decisionFeedbackEnabled else {
+            lastDecisionPromptSignature = nil
+            return
+        }
+        guard let signature = Self.decisionPromptSignature(in: text) else {
+            lastDecisionPromptSignature = nil
+            return
+        }
+        guard signature != lastDecisionPromptSignature else { return }
+
+        let now = Date()
+        if let lastDecisionTriggerAt,
+           now.timeIntervalSince(lastDecisionTriggerAt) < 0.3 {
+            return
+        }
+
+        lastDecisionTriggerAt = now
+        lastDecisionPromptSignature = signature
+        fireDecisionFeedback()
+    }
+
+    private func fireDecisionFeedback() {
+        #if canImport(UIKit)
+        let generator = UIImpactFeedbackGenerator(style: .medium)
+        generator.prepare()
+        generator.impactOccurred()
+        #endif
+        AudioServicesPlaySystemSound(1054)
+    }
+
+    static func detectDecisionPrompt(_ text: String) -> Bool {
+        decisionPromptSignature(in: text) != nil
+    }
+
+    private static func decisionPromptSignature(in text: String) -> String? {
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        for line in lines.reversed() {
+            if isDecisionPromptLine(line) {
+                return line.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+        }
+        return isDecisionPromptLine(text) ? text.trimmingCharacters(in: .whitespacesAndNewlines) : nil
+    }
+
+    private static func isDecisionPromptLine(_ line: String) -> Bool {
+        let lower = line.lowercased()
+        let containsPromptPhrase = [
+            "proceed?",
+            "continue?",
+            "confirm?",
+            "do you want to",
+            "press enter to",
+            "are you sure",
+        ].contains { lower.contains($0) }
+
+        if containsPromptPhrase { return true }
+        if line.contains("✏️") || line.contains("✏") { return true }
+        if lower.range(of: #"\[[[:space:]]*y[[:space:]]*/[[:space:]]*n[[:space:]]*\]"#, options: .regularExpression) != nil {
+            return true
+        }
+        if lower.range(of: #"\([[:space:]]*y[[:space:]]*/[[:space:]]*n[[:space:]]*\)"#, options: .regularExpression) != nil {
+            return true
+        }
+        if lower.range(of: #"\by[[:space:]]*/[[:space:]]*n\b"#, options: .regularExpression) != nil {
+            return true
+        }
+        return false
     }
 
     private func ensureSessionSelected() async {

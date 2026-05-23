@@ -336,6 +336,7 @@ struct CcSettingsView: View {
     @AppStorage("heartbeat_enabled") private var heartbeatEnabled: Bool = true
     @AppStorage("live_activity_enabled") private var liveActivityEnabled: Bool = false
     @AppStorage("notify_on_polling_assistant") private var notifyOnPollingAssistant: Bool = true
+    @AppStorage("enable_decision_haptic") private var enableDecisionHaptic: Bool = true
     @AppStorage("chat_font_size_level") private var chatFontLevel: String = "medium"
     // Phase D 2026-05-11 — "仿 cc 终端文字" default true (旧行为). 关掉显示 "[AI名字] 正在输入..."
     @AppStorage("typing_verbs_enabled") private var typingVerbsEnabled: Bool = true
@@ -447,6 +448,7 @@ struct CcSettingsView: View {
                 section("FEATURES") {
                     toggleRow("仿ClaudeCode趣味Thinking文字", binding: $typingVerbsEnabled)
                     toggleRow("轮询收到助手消息时本地通知", binding: $notifyOnPollingAssistant)
+                    toggleRow("决策提示触感和声效", binding: $enableDecisionHaptic)
                 }
 
                 // Group 7.5 聊天字号
