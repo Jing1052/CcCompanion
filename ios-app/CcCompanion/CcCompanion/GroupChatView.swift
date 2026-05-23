@@ -235,6 +235,8 @@ private struct GroupMessageRow: View {
                     .font(.ccSerifAdaptive(size: 15))
                     .foregroundStyle(Color.ccText)
                     .lineSpacing(3)
+                    .lineLimit(nil)
+                    .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 10)
                     .background(

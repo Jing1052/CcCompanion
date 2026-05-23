@@ -5292,6 +5292,8 @@ struct ChatBubble: View {
                                 Text(s)
                                     .font(.ccSerifAdaptive(size: chatBodySize))
                                     .foregroundStyle(message.isUser ? Color.ccUserText : Color.ccAssistantText)
+                                    .lineLimit(nil)
+                                    .fixedSize(horizontal: false, vertical: true)
                             case .codeBlock(let lang, let code):
                                 VStack(alignment: .leading, spacing: 4) {
                                     if let lang, !lang.isEmpty {
