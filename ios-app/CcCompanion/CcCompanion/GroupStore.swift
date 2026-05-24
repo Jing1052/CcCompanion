@@ -194,15 +194,19 @@ final class GroupStore: ObservableObject {
 
     var typingMembers: [GroupMember] {
         agentStatus
-            .filter { $0.value.isTyping == true }
+            .filter { $0.value.isTyping == true && !GroupMemberRemovalsStore.isRemoved($0.key) }
             .compactMap { membersById[$0.key] ?? GroupMember.defaultMap[$0.key] }
             .sorted { $0.title < $1.title }
     }
 
     func member(for id: String) -> GroupMember {
-        // Build 220 item 5 — 用 activeRosterMap 取 default 兜底, 这样阿眠删过的成员
-        // 不会从 defaultMap 复活成"灰色离线"幽灵. 历史消息里 sender_id 还是会出现 —
-        // 这种情况 fallback 到 minimal placeholder 而不是 default roster 数据.
+        if GroupMemberRemovalsStore.isRemoved(id) {
+            return GroupMember(id: id, displayName: id, kind: nil, avatar: nil, color: "neutral", model: nil, tmux: nil, canReply: nil, optional: nil)
+                .withCustomAvatarURL(GroupAvatarStore.avatarPath(for: id))
+        }
+        // Build 220 item 5: use activeRosterMap for default fallback so removed members
+        // do not come back as inactive entries. Historical sender ids fall back to
+        // a minimal placeholder instead of the default roster.
         let member = membersById[id]
             ?? GroupMember.activeRosterMap[id]
             ?? GroupMember(id: id, displayName: id, kind: nil, avatar: nil, color: "neutral", model: nil, tmux: nil, canReply: nil, optional: nil)
@@ -331,16 +335,28 @@ final class GroupStore: ObservableObject {
 
     /// Agent (kind == "agent") roster — 给 @ picker / mention 解析用.
     var agentMembers: [GroupMember] {
-        membersById.values
-            .filter { ($0.kind ?? "") == "agent" }
+        GroupMember.activeRoster
+            .filter { ($0.kind ?? "") == "agent" && !GroupMemberRemovalsStore.isRemoved($0.id) }
+            .map { member(for: $0.id) }
             .sorted { $0.id < $1.id }
+    }
+
+    func mentionMember(for token: String) -> GroupMember? {
+        let normalized = token.lowercased()
+        return agentMembers.first { member in
+            member.id == token
+                || member.id.lowercased() == normalized
+                || member.displayName == token
+                || member.title == token
+        }
     }
 
     private func fetchRoster() async {
         do {
             let response = try await client.fetchRoster()
-            var map = GroupMember.defaultMap
-            for member in response.roster {
+            let removals = GroupMemberRemovalsStore.removals()
+            var map = GroupMember.activeRosterMap
+            for member in response.roster where !removals.contains(member.id) {
                 map[member.id] = member
             }
             membersById = map

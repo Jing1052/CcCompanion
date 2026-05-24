@@ -147,7 +147,7 @@ struct GroupChatView: View {
                                     parentPreview: parent.map { ($0.text, store.member(for: $0.senderId).title) },
                                     multiSelectMode: multiSelectMode,
                                     isSelected: selectedTs.contains(message.ts),
-                                    memberLookup: { store.member(for: $0) },
+                                    mentionLookup: { store.mentionMember(for: $0) },
                                     onToggleFavorite: {
                                         toggleFavorite(message: message, member: member)
                                     },
@@ -777,9 +777,9 @@ private struct GroupMessageRow: View {
     // Build 218 Q2 — 多选 mode params (默认 off, 父 view 切 on 时切换为 tap-to-select)
     var multiSelectMode: Bool = false
     var isSelected: Bool = false
-    // Build 220 item 8a/10 — 父 view 传 store.member(for:) lookup, 让 @mention render
-    // 取真实成员的 color + override displayName, 不直接用 sender 写的字面
-    var memberLookup: (String) -> GroupMember = { _ in GroupMember(id: "", displayName: "") }
+    // Build 220 item 8a/10: parent view passes active mention lookup so removed
+    // members are not rendered as mention chips.
+    var mentionLookup: (String) -> GroupMember? = { _ in nil }
     let onToggleFavorite: () -> Void
     let onQuote: () -> Void
     let onDelete: () -> Void
@@ -1017,10 +1017,8 @@ private struct GroupMessageRow: View {
     }
 
     private func highlightedText(_ text: String) -> Text {
-        // Build 220 item 8a / 10 — @<token> 渲染时:
-        //   1) 解析 token → 找到 member 把字面替换为用户 override 的 displayName
-        //   2) 用该 member 的 uiColor 染色 + 加粗 (跟 nickname / sender label 同源 — 统一色板)
-        // 如果 token 不映射到任何已知 member, fallback 走 ccAccent + 字面.
+        // Build 220 item 8a / 10: resolve @<token> through the active roster.
+        // Deleted members stay plain text instead of coming back as chips.
         let pattern = #"@([A-Za-z0-9_\-]+|[\u{4E00}-\u{9FFF}]+)"#
         guard let regex = try? NSRegularExpression(pattern: pattern) else {
             return Text(text)
@@ -1037,10 +1035,13 @@ private struct GroupMessageRow: View {
                 result = result + Text(String(text[cursor..<range.lowerBound]))
             }
             let token = String(text[tokenRange])
-            let resolved = mentionResolve(token: token)
-            result = result + Text("@\(resolved.label)")
-                .foregroundColor(resolved.color)
-                .bold()
+            if let resolved = mentionResolve(token: token) {
+                result = result + Text("@\(resolved.label)")
+                    .foregroundColor(resolved.color)
+                    .bold()
+            } else {
+                result = result + Text(String(text[range]))
+            }
             cursor = range.upperBound
         }
         if cursor < text.endIndex {
@@ -1051,19 +1052,19 @@ private struct GroupMessageRow: View {
 
     /// Build 220 item 10 — token → (canonical displayName, member uiColor) 解析.
     /// 走多重 fallback: id 精确匹配 → displayName 匹配 → title 匹配 → 字面 + ccAccent.
-    private func mentionResolve(token: String) -> (label: String, color: Color) {
+    private func mentionResolve(token: String) -> (label: String, color: Color)? {
         let lower = token.lowercased()
-        // 1) 精确 id
-        let direct = memberLookup(token)
-        if !direct.id.isEmpty { return (direct.title, direct.avatarColor) }
-        let directLower = memberLookup(lower)
-        if !directLower.id.isEmpty { return (directLower.title, directLower.avatarColor) }
+        if let direct = mentionLookup(token) {
+            return (direct.title, direct.avatarColor)
+        }
+        if let directLower = mentionLookup(lower) {
+            return (directLower.title, directLower.avatarColor)
+        }
         // 2) "all" / "__all__" / "所有人" / "全员" → 全员 标记 (用 ccAccent 表示)
         if ["all", "__all__", "所有人", "全员", "大家"].contains(lower) || token == "所有人" || token == "全员" {
             return ("所有人", Color.ccAccent)
         }
-        // 3) fallback — 字面 + ccAccent
-        return (token, Color.ccAccent)
+        return nil
     }
 }
 
