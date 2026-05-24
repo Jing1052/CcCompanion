@@ -45,6 +45,12 @@ struct GroupChatView: View {
     @State private var selectedTs: Set<String> = []
     @State private var multiDeleteConfirm: Bool = false
 
+    // Build 220 item 4 — 附件预览 (选附件后不立即发, 进 preview sheet 加 caption + @ 再发)
+    @State private var pendingAttachment: PendingAttachment? = nil
+    @State private var pendingCaption: String = ""
+    @State private var pendingMentions: [String] = []
+    @State private var pendingAgentPicker: Bool = false
+
     private var chatBodySize: CGFloat {
         chatFontLevel == "small" ? 15 : chatFontLevel == "large" ? 18 : 17
     }
@@ -137,15 +143,18 @@ struct GroupChatView: View {
                                     member: member,
                                     bodySize: chatBodySize,
                                     isFavorite: favoriteMessageIds.contains(message.id),
-                                    parentPreview: parent.map { ($0.text, store.member(for: $0.senderId).displayName) },
+                                    // Build 220 item 10 — 引用 parent message 时也走 store.member.title (走 override)
+                                    parentPreview: parent.map { ($0.text, store.member(for: $0.senderId).title) },
                                     multiSelectMode: multiSelectMode,
                                     isSelected: selectedTs.contains(message.ts),
+                                    memberLookup: { store.member(for: $0) },
                                     onToggleFavorite: {
                                         toggleFavorite(message: message, member: member)
                                     },
                                     onQuote: { quoteMessage(message, member: member) },
                                     onDelete: {
-                                        Task { try? await GroupNetworkClient.shared.deleteMessage(id: message.id); await store.refreshNow() }
+                                        // Build 220 item 6 — 走 store.deleteMessage 立刻本地 remove + 异步 server
+                                        Task { await store.deleteMessage(id: message.id) }
                                     },
                                     onEnterMultiSelect: {
                                         multiSelectMode = true
@@ -288,33 +297,38 @@ struct GroupChatView: View {
             maxSelectionCount: 9,
             matching: .images
         )
+        // Build 220 item 4 — 选附件后不立即发, 走 preview sheet (caption + @ + send)
         .onChange(of: photoItems) { _, newItems in
-            guard !newItems.isEmpty else { return }
-            let items = newItems
+            guard let first = newItems.first else { return }
             photoItems = []
             Task {
-                for item in items {
-                    if let data = try? await item.loadTransferable(type: Data.self) {
-                        await uploadAttachmentData(data, filename: "image_\(Int(Date().timeIntervalSince1970)).jpg")
-                    }
+                if let data = try? await first.loadTransferable(type: Data.self) {
+                    pendingAttachment = PendingAttachment(
+                        data: data,
+                        filename: "image_\(Int(Date().timeIntervalSince1970)).jpg",
+                        kind: "image"
+                    )
+                    pendingCaption = ""
+                    pendingMentions = []
                 }
             }
         }
         .fileImporter(
             isPresented: $showFileImporter,
             allowedContentTypes: [.item],
-            allowsMultipleSelection: true
+            allowsMultipleSelection: false
         ) { result in
             switch result {
             case .success(let urls):
-                Task {
-                    for url in urls {
-                        let scoped = url.startAccessingSecurityScopedResource()
-                        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-                        guard let data = try? Data(contentsOf: url) else { continue }
-                        await uploadAttachmentData(data, filename: url.lastPathComponent)
-                    }
-                }
+                guard let url = urls.first else { return }
+                let scoped = url.startAccessingSecurityScopedResource()
+                defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+                guard let data = try? Data(contentsOf: url) else { return }
+                pendingAttachment = PendingAttachment(
+                    data: data, filename: url.lastPathComponent, kind: "file"
+                )
+                pendingCaption = ""
+                pendingMentions = []
             case .failure(let err):
                 inputToast = "选择文件失败: \(err.localizedDescription)"
             }
@@ -322,13 +336,66 @@ struct GroupChatView: View {
         #if os(iOS)
         .fullScreenCover(isPresented: $showCameraPicker) {
             CameraPicker { data in
-                Task {
-                    await uploadAttachmentData(Data(data), filename: "camera_\(Int(Date().timeIntervalSince1970)).jpg")
-                }
+                pendingAttachment = PendingAttachment(
+                    data: Data(data),
+                    filename: "camera_\(Int(Date().timeIntervalSince1970)).jpg",
+                    kind: "image"
+                )
+                pendingCaption = ""
+                pendingMentions = []
             }
             .ignoresSafeArea()
         }
         #endif
+        // Build 220 item 4 — preview sheet 复用 caption + @ + send 跟 ChatView 同款
+        .sheet(item: $pendingAttachment) { att in
+            AttachmentPreviewSheet(
+                attachment: att,
+                caption: $pendingCaption,
+                mentions: $pendingMentions,
+                agentMembers: store.agentMembers,
+                memberLookup: { store.member(for: $0) },
+                onPickAgent: { pendingAgentPicker = true },
+                onSend: {
+                    let captionToSend = pendingCaption
+                    let mentionsToSend = pendingMentions
+                    let data = att.data
+                    let filename = att.filename
+                    pendingAttachment = nil
+                    pendingCaption = ""
+                    pendingMentions = []
+                    Task {
+                        _ = await store.uploadUserAttachment(
+                            data: data,
+                            filename: filename,
+                            caption: captionToSend,
+                            mentions: mentionsToSend,
+                            replyTo: nil
+                        )
+                    }
+                },
+                onCancel: {
+                    pendingAttachment = nil
+                    pendingCaption = ""
+                    pendingMentions = []
+                }
+            )
+            .sheet(isPresented: $pendingAgentPicker) {
+                AgentMentionPicker(
+                    members: store.agentMembers,
+                    onPick: { member in
+                        if !pendingMentions.contains(member.id) {
+                            pendingMentions.append(member.id)
+                        }
+                        pendingAgentPicker = false
+                    },
+                    onPickAll: {
+                        pendingMentions = ["__all__"]
+                        pendingAgentPicker = false
+                    }
+                )
+            }
+        }
         .sheet(isPresented: $showAgentPicker) {
             AgentMentionPicker(
                 members: store.agentMembers,
@@ -381,9 +448,18 @@ struct GroupChatView: View {
             }
             .frame(width: 38, height: 38)
             .clipShape(Circle())
-            Text(headerTitle)
-                .font(.ccSerifAdaptive(size: 17, weight: .semibold))
-                .foregroundStyle(Color.ccAccent)
+            // Build 220 item 13 — 群标题下加 "N 人在线" + 绿色呼吸圆点 (轮询 5s)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(headerTitle)
+                    .font(.ccSerifAdaptive(size: 17, weight: .semibold))
+                    .foregroundStyle(Color.ccAccent)
+                HStack(spacing: 5) {
+                    BreathDot()
+                    Text("\(store.onlineCount) 人在线")
+                        .font(.ccSerifAdaptive(size: 11))
+                        .foregroundStyle(Color.ccTextDim)
+                }
+            }
             Spacer()
             Button {
                 withAnimation(.easeInOut(duration: 0.16)) {
@@ -619,13 +695,9 @@ struct GroupChatView: View {
     }
 
     private func batchDelete() {
+        // Build 220 item 6 — 走 store.deleteMessages 立刻本地 remove + 异步 server
         let ids = selectedMessages().map(\.id)
-        Task {
-            for id in ids {
-                try? await GroupNetworkClient.shared.deleteMessage(id: id)
-            }
-            await store.refreshNow()
-        }
+        Task { await store.deleteMessages(ids: ids) }
         exitMultiSelect()
     }
 }
@@ -646,9 +718,10 @@ private struct GroupChatStatusStrip: View {
                             Circle()
                                 .fill(status?.state == "online" ? Color.green : Color.ccTextDim.opacity(0.35))
                                 .frame(width: 7, height: 7)
+                            // Build 220 item 8b — nickname 染该成员 color (status strip)
                             Text(member.title)
                                 .font(.ccSerifAdaptive(size: 12, weight: .semibold))
-                                .foregroundStyle(Color.ccText)
+                                .foregroundStyle(member.avatarColor)
                             // Build 214 T2 — agent 名字后带模型名 半透明小字 (status strip 保留 model)
                             if let model = member.model, !model.isEmpty {
                                 Text("· \(model)")
@@ -684,8 +757,11 @@ private struct GroupChatStatusStrip: View {
     }
 
     private var statusMembers: [GroupMember] {
-        let preferred = ["opia", "sonnet", "di", "shu", "opus47_fresh"]
-        return preferred.map { store.member(for: $0) }
+        // Build 220 item 5 — 走 activeRoster (defaults - removals + additions). 不再 hardcode 5 id.
+        // 阿眠删过的成员不渲染, 加过的新成员显示.
+        return GroupMember.activeRoster
+            .filter { $0.kind == "agent" || $0.kind == nil }
+            .map { store.member(for: $0.id) }
     }
 }
 
@@ -701,6 +777,9 @@ private struct GroupMessageRow: View {
     // Build 218 Q2 — 多选 mode params (默认 off, 父 view 切 on 时切换为 tap-to-select)
     var multiSelectMode: Bool = false
     var isSelected: Bool = false
+    // Build 220 item 8a/10 — 父 view 传 store.member(for:) lookup, 让 @mention render
+    // 取真实成员的 color + override displayName, 不直接用 sender 写的字面
+    var memberLookup: (String) -> GroupMember = { _ in GroupMember(id: "", displayName: "") }
     let onToggleFavorite: () -> Void
     let onQuote: () -> Void
     let onDelete: () -> Void
@@ -718,9 +797,10 @@ private struct GroupMessageRow: View {
             VStack(alignment: message.isHumanSender ? .trailing : .leading, spacing: 4) {
                 HStack(spacing: 6) {
                     if message.isHumanSender { messageTypeBadge }
+                    // Build 220 item 8c — sender label 染该成员 color (跟 mention chip / nickname 同源)
                     Text(member.title)
                         .font(.ccSerifAdaptive(size: 12, weight: .semibold))
-                        .foregroundStyle(Color.ccTextDim)
+                        .foregroundStyle(member.avatarColor)
                     // Build 214 T2 — name · model (message row 保留 model)
                     if let model = member.model, !model.isEmpty {
                         Text("· \(model)")
@@ -814,13 +894,15 @@ private struct GroupMessageRow: View {
                 Label("删除", systemImage: "trash")
             }
         }
-        // Build 218 Q2 — 多选 mode 下 tap bubble 切换 selection (绕过 contextMenu hit-test).
-        .overlay(alignment: .topLeading) {
+        // Build 220 item 7 — 多选 checkmark 移到 bubble 外侧 不挤头像:
+        //   user (amian) bubble 在右侧 avatar 在右, checkmark 走左外侧
+        //   agent bubble 在左侧 avatar 在左, checkmark 走右外侧
+        .overlay(alignment: message.isHumanSender ? .topLeading : .topTrailing) {
             if multiSelectMode {
                 Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(isSelected ? Color.ccAccent : Color.ccTextDim)
-                    .padding(.leading, 4)
+                    .padding(message.isHumanSender ? .leading : .trailing, 4)
                     .padding(.top, 22)
             }
         }
@@ -935,6 +1017,10 @@ private struct GroupMessageRow: View {
     }
 
     private func highlightedText(_ text: String) -> Text {
+        // Build 220 item 8a / 10 — @<token> 渲染时:
+        //   1) 解析 token → 找到 member 把字面替换为用户 override 的 displayName
+        //   2) 用该 member 的 uiColor 染色 + 加粗 (跟 nickname / sender label 同源 — 统一色板)
+        // 如果 token 不映射到任何已知 member, fallback 走 ccAccent + 字面.
         let pattern = #"@([A-Za-z0-9_\-]+|[\u{4E00}-\u{9FFF}]+)"#
         guard let regex = try? NSRegularExpression(pattern: pattern) else {
             return Text(text)
@@ -945,12 +1031,15 @@ private struct GroupMessageRow: View {
         var result = Text("")
         var cursor = text.startIndex
         for match in matches {
-            guard let range = Range(match.range, in: text) else { continue }
+            guard let range = Range(match.range, in: text),
+                  let tokenRange = Range(match.range(at: 1), in: text) else { continue }
             if cursor < range.lowerBound {
                 result = result + Text(String(text[cursor..<range.lowerBound]))
             }
-            result = result + Text(String(text[range]))
-                .foregroundColor(Color.ccAccent)
+            let token = String(text[tokenRange])
+            let resolved = mentionResolve(token: token)
+            result = result + Text("@\(resolved.label)")
+                .foregroundColor(resolved.color)
                 .bold()
             cursor = range.upperBound
         }
@@ -958,6 +1047,23 @@ private struct GroupMessageRow: View {
             result = result + Text(String(text[cursor..<text.endIndex]))
         }
         return result
+    }
+
+    /// Build 220 item 10 — token → (canonical displayName, member uiColor) 解析.
+    /// 走多重 fallback: id 精确匹配 → displayName 匹配 → title 匹配 → 字面 + ccAccent.
+    private func mentionResolve(token: String) -> (label: String, color: Color) {
+        let lower = token.lowercased()
+        // 1) 精确 id
+        let direct = memberLookup(token)
+        if !direct.id.isEmpty { return (direct.title, direct.avatarColor) }
+        let directLower = memberLookup(lower)
+        if !directLower.id.isEmpty { return (directLower.title, directLower.avatarColor) }
+        // 2) "all" / "__all__" / "所有人" / "全员" → 全员 标记 (用 ccAccent 表示)
+        if ["all", "__all__", "所有人", "全员", "大家"].contains(lower) || token == "所有人" || token == "全员" {
+            return ("所有人", Color.ccAccent)
+        }
+        // 3) fallback — 字面 + ccAccent
+        return (token, Color.ccAccent)
     }
 }
 
@@ -996,6 +1102,136 @@ private struct GroupTypingDots: View {
                 }
             }
         }
+    }
+}
+
+// Build 220 item 4 — 附件预览 sheet model (data + filename + kind)
+struct PendingAttachment: Identifiable {
+    let id = UUID()
+    let data: Data
+    let filename: String
+    let kind: String  // "image" / "file" / "video"
+}
+
+// Build 220 item 4 — 附件预览 sheet (对标 ChatView 行为)
+// 选附件后展示 thumbnail + caption TextField + @ picker + send button
+struct AttachmentPreviewSheet: View {
+    let attachment: PendingAttachment
+    @Binding var caption: String
+    @Binding var mentions: [String]
+    let agentMembers: [GroupMember]
+    let memberLookup: (String) -> GroupMember
+    let onPickAgent: () -> Void
+    let onSend: () -> Void
+    let onCancel: () -> Void
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 16) {
+                    // Thumbnail / file icon
+                    if attachment.kind == "image", let img = UIImage(data: attachment.data) {
+                        Image(uiImage: img)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(maxHeight: 380)
+                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .padding(.horizontal, 16)
+                    } else {
+                        HStack(spacing: 12) {
+                            Image(systemName: "doc.fill")
+                                .font(.system(size: 28, weight: .semibold))
+                                .foregroundStyle(Color.ccAccent)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(attachment.filename)
+                                    .font(.ccSerifAdaptive(size: 14, weight: .semibold))
+                                    .foregroundStyle(Color.ccText)
+                                    .lineLimit(2)
+                                Text("\(attachment.data.count / 1024) KB")
+                                    .font(.ccSerifAdaptive(size: 11))
+                                    .foregroundStyle(Color.ccTextDim)
+                            }
+                            Spacer()
+                        }
+                        .padding(14)
+                        .background(Color.ccCard)
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .padding(.horizontal, 16)
+                    }
+
+                    // @ chips
+                    if !mentions.isEmpty {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                ForEach(mentions, id: \.self) { mid in
+                                    let m = mid == "__all__"
+                                        ? GroupMember(id: "__all__", displayName: "所有人")
+                                        : memberLookup(mid)
+                                    HStack(spacing: 4) {
+                                        Text("@\(m.title)")
+                                            .font(.ccSerifAdaptive(size: 12, weight: .semibold))
+                                            .foregroundStyle(m.avatarColor)
+                                        Button {
+                                            mentions.removeAll { $0 == mid }
+                                        } label: {
+                                            Image(systemName: "xmark.circle.fill")
+                                                .font(.system(size: 12))
+                                                .foregroundStyle(Color.ccTextDim)
+                                        }
+                                        .buttonStyle(.plain)
+                                    }
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 5)
+                                    .background(Capsule().fill(m.avatarColor.opacity(0.12)))
+                                }
+                            }
+                            .padding(.horizontal, 16)
+                        }
+                    }
+
+                    // Caption + @ button
+                    HStack(spacing: 8) {
+                        Button { onPickAgent() } label: {
+                            Image(systemName: "at")
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundStyle(Color.ccAccent)
+                        }
+                        .buttonStyle(.plain)
+                        TextField("加点说明（可选）…", text: $caption, axis: .vertical)
+                            .lineLimit(1...4)
+                            .font(.system(size: 15))
+                            .textFieldStyle(.roundedBorder)
+                    }
+                    .padding(.horizontal, 16)
+                }
+                .padding(.vertical, 16)
+            }
+            .background(Color.ccBg)
+            .navigationTitle("预览发送")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") { onCancel() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("发送") { onSend() }
+                        .fontWeight(.semibold)
+                }
+            }
+        }
+    }
+}
+
+// Build 220 item 13 — 在线状态 绿色呼吸圆点 (opacity 0.4 ↔ 1.0 ping-pong 1.5s)
+private struct BreathDot: View {
+    @State private var bright = false
+    var body: some View {
+        Circle()
+            .fill(Color.green)
+            .frame(width: 7, height: 7)
+            .opacity(bright ? 1.0 : 0.4)
+            .animation(.easeInOut(duration: 1.5).repeatForever(autoreverses: true), value: bright)
+            .onAppear { bright = true }
     }
 }
 
@@ -1048,7 +1284,7 @@ private struct GroupInputBar: View {
             .disabled(sending)
 
             ZStack(alignment: .trailing) {
-                TextField("说点什么…", text: $draft, axis: .vertical)
+                TextField("艾特一个 AI 派活", text: $draft, axis: .vertical)
                     .lineLimit(1...5)
                     .font(.system(size: 17))
                     .tint(Color.ccAccent)
@@ -1111,10 +1347,10 @@ private struct AgentMentionPicker: View {
                         }
                         .frame(width: 32, height: 32)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("艾特所有人")
+                            Text("@所有人")
                                 .font(.ccSerifAdaptive(size: 15, weight: .semibold))
                                 .foregroundStyle(Color.ccText)
-                            Text("@all 群里全员 fan-out")
+                            Text("群里全员")
                                 .font(.ccSerifAdaptive(size: 11))
                                 .foregroundStyle(Color.ccTextDim)
                         }
@@ -1154,7 +1390,7 @@ private struct AgentMentionPicker: View {
                 }
             }
             .listStyle(.plain)
-            .navigationTitle("选 agent")
+            .navigationTitle("要艾特谁")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

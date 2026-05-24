@@ -27,6 +27,12 @@ nonisolated struct GroupRosterResponse: Codable, Sendable {
     let status: GroupStatusSnapshot?
 }
 
+nonisolated struct GroupRosterOnlineResponse: Codable, Sendable {
+    let ok: Bool
+    let count: Int
+    let online: [String]
+}
+
 actor GroupNetworkClient {
     static let shared = GroupNetworkClient()
 
@@ -121,10 +127,24 @@ actor GroupNetworkClient {
         return true
     }
 
+    /// Build 220 item 13 — 在线人数 endpoint.
+    func fetchOnlineRoster() async throws -> GroupRosterOnlineResponse {
+        let url = CcServerConfig.serverURL.appendingPathComponent("group/roster/online")
+        var request = CcServerConfig.authenticatedRequest(url: url)
+        request.timeoutInterval = 10
+        let (data, response) = try await session.data(for: request)
+        try Self.validate(response: response)
+        return try JSONDecoder().decode(GroupRosterOnlineResponse.self, from: data)
+    }
+
     func fetchPoll(since: String?, limit: Int) async throws -> GroupPollResponse {
         let url = CcServerConfig.serverURL.appendingPathComponent("group/poll")
         var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
-        var items = [URLQueryItem(name: "limit", value: "\(limit)")]
+        // Build 220 item 13 — heartbeat: sender_id=amian 让 /group/roster/online 把 amian 也算在线
+        var items = [
+            URLQueryItem(name: "limit", value: "\(limit)"),
+            URLQueryItem(name: "sender_id", value: "amian"),
+        ]
         if let since, !since.isEmpty {
             items.append(URLQueryItem(name: "since", value: since))
         }
@@ -157,6 +177,9 @@ final class GroupStore: ObservableObject {
     // Build 215 T1 — 客户端 unread / mention 计数. 视图 onAppear markAllRead() 清零, polling 拉到新消息 → 自增.
     @Published var unreadCount: Int = 0
     @Published var mentionCount: Int = 0
+    // Build 220 item 13 — 在线人数 (每 5s 拉 /group/roster/online).
+    @Published var onlineCount: Int = 0
+    @Published var onlineIds: [String] = []
     // 持久化 last_seen_ts 让 app 重启后 unread 状态可恢复 (不靠后端 endpoint).
     private let lastSeenKey = "group_last_seen_ts"
     private var lastSeenTs: String {
@@ -165,6 +188,7 @@ final class GroupStore: ObservableObject {
     }
 
     private var pollTask: Task<Void, Never>? = nil
+    private var onlinePollTask: Task<Void, Never>? = nil  // Build 220 item 13
     private var lastTs: String? = nil
     private let client = GroupNetworkClient.shared
 
@@ -176,8 +200,11 @@ final class GroupStore: ObservableObject {
     }
 
     func member(for id: String) -> GroupMember {
+        // Build 220 item 5 — 用 activeRosterMap 取 default 兜底, 这样阿眠删过的成员
+        // 不会从 defaultMap 复活成"灰色离线"幽灵. 历史消息里 sender_id 还是会出现 —
+        // 这种情况 fallback 到 minimal placeholder 而不是 default roster 数据.
         let member = membersById[id]
-            ?? GroupMember.defaultMap[id]
+            ?? GroupMember.activeRosterMap[id]
             ?? GroupMember(id: id, displayName: id, kind: nil, avatar: nil, color: "neutral", model: nil, tmux: nil, canReply: nil, optional: nil)
         return member.withCustomAvatarURL(GroupAvatarStore.avatarPath(for: id))
     }
@@ -191,11 +218,33 @@ final class GroupStore: ObservableObject {
                 await self?.pollNext()
             }
         }
+        // Build 220 item 13 — 在线人数 5s 轮询
+        onlinePollTask?.cancel()
+        onlinePollTask = Task { [weak self] in
+            await self?.refreshOnlineCount()
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 5_000_000_000)
+                await self?.refreshOnlineCount()
+            }
+        }
     }
 
     func stop() {
         pollTask?.cancel()
         pollTask = nil
+        onlinePollTask?.cancel()
+        onlinePollTask = nil
+    }
+
+    /// Build 220 item 13 — pull /group/roster/online; populate onlineCount + onlineIds.
+    private func refreshOnlineCount() async {
+        do {
+            let resp = try await client.fetchOnlineRoster()
+            onlineCount = resp.count
+            onlineIds = resp.online
+        } catch {
+            // silent — header dot 不显示 ok
+        }
     }
 
     func reload() async {
@@ -209,6 +258,32 @@ final class GroupStore: ObservableObject {
     func refreshNow() async {
         await fetchRoster()
         await fetchMessages(reset: false)
+    }
+
+    /// Build 220 item 6 — 删消息: 立刻本地 remove (UI 即时反馈) + 异步 server delete + poll 兜底.
+    /// 解决之前 "删完 UI 不消失" 的 bug — 之前等 server poll 才更新 1-5s 延迟.
+    func deleteMessage(id: String) async {
+        // 1. 本地 array 立刻 remove (UI 在下次 main run loop 闪掉)
+        let beforeCount = messages.count
+        messages.removeAll { $0.id == id }
+        guard messages.count < beforeCount else { return }  // 没找到 不发 server (避免冗余 call)
+        // 2. server delete (fire-and-forget — server poll 会兜底真删)
+        do {
+            _ = try await GroupNetworkClient.shared.deleteMessage(id: id)
+        } catch {
+            // server 端失败 — refresh 拉回真实状态 (会把刚删的消息加回来)
+            lastError = "删除消息失败 (server 不可达?): \(error.localizedDescription)"
+            await fetchMessages(reset: false)
+        }
+    }
+
+    /// Build 220 item 6 — 多选批量删 同 deleteMessage 模式.
+    func deleteMessages(ids: [String]) async {
+        let idSet = Set(ids)
+        messages.removeAll { idSet.contains($0.id) }
+        for id in ids {
+            _ = try? await GroupNetworkClient.shared.deleteMessage(id: id)
+        }
     }
 
     private func pollNext() async {

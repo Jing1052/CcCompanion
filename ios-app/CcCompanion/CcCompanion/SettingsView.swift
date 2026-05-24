@@ -791,6 +791,13 @@ struct CcSettingsView: View {
                 groupAvatarPickerPresented = true
             } onCancel: {
                 memberEditTarget = nil
+            } onDelete: {
+                // Build 220 item 1 — Edit sheet 红删除按钮调这里, 跟 contextMenu 删除路径同款
+                GroupMemberRemovalsStore.markRemoved(member.id)
+                GroupMemberAdditionsStore.remove(id: member.id)
+                Task { await GroupMemberSyncClient.delete(id: member.id) }
+                memberEditTarget = nil
+                actionToast = "已从群里删除 \(member.title)"
             }
         }
         .sheet(isPresented: $memberAddSheetPresented) {
@@ -1625,10 +1632,12 @@ struct GroupMemberEditSheet: View {
     let onSave: (String, Bool) -> Void  // (newName, clearAvatar)
     let onPickAvatar: () -> Void
     let onCancel: () -> Void
+    let onDelete: () -> Void  // Build 220 item 1 — 显式删除入口, 不靠长按 contextMenu
 
     @Environment(\.dismiss) private var dismiss
     @State private var draftName: String = ""
     @State private var draftClearAvatar: Bool = false
+    @State private var showDeleteConfirm: Bool = false
 
     var body: some View {
         NavigationStack {
@@ -1676,8 +1685,28 @@ struct GroupMemberEditSheet: View {
                         HStack { Text("tmux session").foregroundStyle(Color.ccTextDim); Spacer(); Text(tmux).font(.system(.body, design: .monospaced)) }
                     }
                 }
+                // Build 220 item 1 — 显式删除按钮 (替代长按 contextMenu 隐藏入口)
+                Section {
+                    Button(role: .destructive) {
+                        showDeleteConfirm = true
+                    } label: {
+                        HStack {
+                            Image(systemName: "trash")
+                            Text("删除成员")
+                                .font(.ccSerifAdaptive(size: 15, weight: .semibold))
+                        }
+                        .foregroundStyle(.red)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                    }
+                }
             }
             .navigationTitle("编辑 \(member.title)")
+            .alert("删除 \(member.title)?", isPresented: $showDeleteConfirm) {
+                Button("取消", role: .cancel) {}
+                Button("删除", role: .destructive) { onDelete() }
+            } message: {
+                Text("从群里删除 \(member.title). 长按列表行也能撤回 (会出现在隐藏成员里).")
+            }
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -1713,7 +1742,14 @@ struct GroupMemberAddSheet: View {
     @State private var draftColor: String = "slate"
     @State private var draftAvatar: String = ""
 
-    private let colorOptions = ["orange", "blue", "green", "purple", "slate", "neutral"]
+    private let colorOptions: [(tag: String, label: String)] = [
+        ("orange",  "暖橙"),
+        ("blue",    "雾青"),
+        ("green",   "苔绿"),
+        ("purple",  "鸢尾紫"),
+        ("slate",   "石板"),
+        ("neutral", "米白"),
+    ]
 
     var body: some View {
         NavigationStack {
@@ -1734,13 +1770,33 @@ struct GroupMemberAddSheet: View {
                     TextField("tmux session 名", text: $draftTmux)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled(true)
-                    Toggle("可回复 (canReply)", isOn: $draftCanReply)
+                    Toggle("允许回复", isOn: $draftCanReply)
                 }
                 Section("颜色") {
-                    Picker("颜色", selection: $draftColor) {
-                        ForEach(colorOptions, id: \.self) { Text($0).tag($0) }
+                    // Build 220 item 9 — 圆色块 grid, 每块下面文字标签. 走 designer-grade muted 色板.
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 60), spacing: 12)], spacing: 12) {
+                        ForEach(colorOptions, id: \.tag) { opt in
+                            Button {
+                                draftColor = opt.tag
+                            } label: {
+                                VStack(spacing: 4) {
+                                    Circle()
+                                        .fill(GroupMember.swatchColor(for: opt.tag))
+                                        .frame(width: 36, height: 36)
+                                        .overlay(
+                                            Circle()
+                                                .stroke(draftColor == opt.tag ? Color.ccAccent : Color.ccTextDim.opacity(0.2),
+                                                        lineWidth: draftColor == opt.tag ? 2.5 : 0.5)
+                                        )
+                                    Text(opt.label)
+                                        .font(.ccSerifAdaptive(size: 11, weight: draftColor == opt.tag ? .semibold : .regular))
+                                        .foregroundStyle(draftColor == opt.tag ? Color.ccText : Color.ccTextDim)
+                                }
+                            }
+                            .buttonStyle(.plain)
+                        }
                     }
-                    .pickerStyle(.segmented)
+                    .padding(.vertical, 6)
                 }
             }
             .navigationTitle("添加成员")

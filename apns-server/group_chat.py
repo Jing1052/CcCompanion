@@ -249,6 +249,31 @@ class GroupChatStore:
     def member(self, agent_id: str) -> dict[str, Any] | None:
         return ROSTER_BY_ID.get(agent_id)
 
+    def touch_active(self, sender_id: str) -> None:
+        """Build 220 item 13 — record sender as active right now (for /group/roster/online).
+        Called by /group/poll when client sends sender_id query (viewer heartbeat).
+        """
+        if not sender_id:
+            return
+        with self._lock:
+            ts = _now_iso()
+            self._state.setdefault("agents", {}).setdefault(sender_id, {})["last_seen"] = ts
+            self._save_state()
+
+    def recently_active_senders(self, window_seconds: int = 60) -> list[str]:
+        """Build 220 item 13 — ids that updated last_seen within the window."""
+        now = datetime.now(timezone.utc).astimezone()
+        cutoff = now - timedelta(seconds=window_seconds)
+        out: list[str] = []
+        for sender_id, info in self._state.get("agents", {}).items():
+            ts_str = (info or {}).get("last_seen")
+            if not ts_str:
+                continue
+            parsed = _parse_iso(str(ts_str))
+            if parsed and parsed >= cutoff:
+                out.append(sender_id)
+        return out
+
     def normalize_mentions(self, mentions: Any = None, text: str | None = None) -> list[str]:
         raw: list[str] = []
         if isinstance(mentions, str):

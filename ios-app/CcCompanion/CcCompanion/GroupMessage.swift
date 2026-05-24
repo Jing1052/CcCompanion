@@ -195,13 +195,34 @@ nonisolated struct GroupMember: Identifiable, Codable, Hashable, Sendable {
     }
 
     var avatarColor: Color {
-        switch color {
-        case "orange": return Color(red: 0.92, green: 0.45, blue: 0.20)
-        case "blue": return Color(red: 0.25, green: 0.48, blue: 0.95)
-        case "green": return Color(red: 0.20, green: 0.62, blue: 0.38)
-        case "purple": return Color(red: 0.52, green: 0.38, blue: 0.86)
-        case "slate": return Color(red: 0.38, green: 0.44, blue: 0.52)
-        default: return Color(red: 0.92, green: 0.45, blue: 0.20)
+        // Build 220 item 8/9 — 走统一 designer 色板 (avatar / mention chip / nickname / sender label 同源)
+        GroupMember.uiColor(for: color)
+    }
+
+    /// Build 220 item 8/9 — central palette resolver. 走 designer-grade muted 色 (避免荧光), 全 WCAG AA on cream/beige bg.
+    /// 任何需要"按 color 字段染色"的地方都调这里 保证一致 (mention chip / nickname / sender label / avatar).
+    static func uiColor(for colorTag: String?) -> Color {
+        switch colorTag {
+        case "orange":  return Color(red: 0.80, green: 0.50, blue: 0.10)  // 暖橙 (= ccAccent)
+        case "blue":    return Color(red: 0.37, green: 0.55, blue: 0.66)  // 雾青
+        case "green":   return Color(red: 0.42, green: 0.57, blue: 0.39)  // 苔绿
+        case "purple":  return Color(red: 0.53, green: 0.44, blue: 0.66)  // 鸢尾紫
+        case "slate":   return Color(red: 0.42, green: 0.45, blue: 0.50)  // 石板
+        case "neutral": return Color(red: 0.55, green: 0.51, blue: 0.45)  // 米白 (作为前景需更深)
+        default:        return Color(red: 0.80, green: 0.50, blue: 0.10)
+        }
+    }
+
+    /// Display swatch (for picker / preview) — saturated 一些方便 UI 看清.
+    static func swatchColor(for colorTag: String?) -> Color {
+        switch colorTag {
+        case "orange":  return Color(red: 0.85, green: 0.55, blue: 0.18)
+        case "blue":    return Color(red: 0.45, green: 0.65, blue: 0.78)
+        case "green":   return Color(red: 0.50, green: 0.65, blue: 0.48)
+        case "purple":  return Color(red: 0.60, green: 0.50, blue: 0.72)
+        case "slate":   return Color(red: 0.50, green: 0.55, blue: 0.60)
+        case "neutral": return Color(red: 0.85, green: 0.80, blue: 0.72)
+        default:        return Color(red: 0.85, green: 0.55, blue: 0.18)
         }
     }
 
@@ -221,6 +242,23 @@ nonisolated struct GroupMember: Identifiable, Codable, Hashable, Sendable {
 
     static var defaultMap: [String: GroupMember] {
         Dictionary(uniqueKeysWithValues: defaults.map { ($0.id, $0) })
+    }
+
+    /// Build 220 item 5 — 用户实际在群里看到的成员列表 (default - removals + additions).
+    /// 任何"render 群成员名单/状态条" 走这个 source 不直接走 defaults / defaultMap.
+    static var activeRoster: [GroupMember] {
+        let removals = GroupMemberRemovalsStore.removals()
+        var list = defaults.filter { !removals.contains($0.id) }
+        for added in GroupMemberAdditionsStore.additions() where !removals.contains(added.id) {
+            // 避免重复 (additions 可能跟 defaults 有 id 重叠 — additions win)
+            list.removeAll { $0.id == added.id }
+            list.append(added)
+        }
+        return list
+    }
+
+    static var activeRosterMap: [String: GroupMember] {
+        Dictionary(uniqueKeysWithValues: activeRoster.map { ($0.id, $0) })
     }
 }
 
