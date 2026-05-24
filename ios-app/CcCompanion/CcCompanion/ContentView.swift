@@ -56,6 +56,8 @@ struct ContentView: View {
     // Build 215 T1 — GroupStore 提到 ContentView 层 让 tab badge 能读 unread / mention 计数.
     // GroupChatView 接受 @ObservedObject 共用同一个实例 (避免双 store 双 polling).
     @StateObject private var groupStore = GroupStore()
+    // Build 215 P4 — chat tab unread badge store (跑独立 light polling 不依赖 ChatViewModel)
+    @StateObject private var chatBadgeStore = ChatBadgeStore()
     @AppStorage("cc_onboarding_completed") private var onboardingCompleted: Bool = false
     @AppStorage("feature_group_view") private var featureGroupView: Bool = false
 
@@ -72,9 +74,13 @@ struct ContentView: View {
         return .none
     }
 
+    private var chatTabBadge: BadgeStyle {
+        chatBadgeStore.unreadCount > 0 ? .unreadDot : .none
+    }
+
     private var tabs: [FloatingTabBarItem] {
         var items: [FloatingTabBarItem] = [
-            .init(id: 0, title: "聊天", systemImage: "bubble.left.and.bubble.right"),
+            .init(id: 0, title: "聊天", systemImage: "bubble.left.and.bubble.right", badge: chatTabBadge),
         ]
         if featureGroupView {
             items.append(.init(id: 3, title: "群聊", systemImage: "person.3.sequence.fill", badge: groupTabBadge))
@@ -121,6 +127,8 @@ struct ContentView: View {
             if featureGroupView {
                 groupStore.start()
             }
+            // Build 215 P4 — chat badge polling 一直跑 (不绑 feature flag, 聊天 tab 永远存在)
+            chatBadgeStore.start()
         }
         .onChange(of: featureGroupView) { _, enabled in
             if enabled {
@@ -130,7 +138,11 @@ struct ContentView: View {
             }
         }
         .onChange(of: selectedTab) { _, newTab in
-            if newTab == 0 { chatScrollToken &+= 1 }
+            if newTab == 0 {
+                chatScrollToken &+= 1
+                // Build 215 P4 — 进 chat tab 视为已读, 清 badge
+                chatBadgeStore.markAllRead()
+            }
         }
         .onChange(of: featureGroupView) { _, enabled in
             if !enabled && selectedTab == 3 {

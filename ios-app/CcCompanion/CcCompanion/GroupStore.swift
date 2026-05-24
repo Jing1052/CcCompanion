@@ -201,6 +201,9 @@ final class GroupStore: ObservableObject {
             let response = try await client.fetchPoll(since: reset ? nil : lastTs, limit: reset ? 120 : 80)
             if reset {
                 messages = response.records
+                // Build 215 P1 — reset 路径也按 lastSeenTs 重算 unread/mention.
+                // 修上一单 cold start 漏: app 重开走 reload → reset=true → 之前只赋 messages, unreadCount 不动 → 后台期间到的新消息漏算.
+                recomputeUnreadFromMessages()
             } else {
                 merge(records: response.records)
             }
@@ -241,6 +244,24 @@ final class GroupStore: ObservableObject {
                 }
             }
         }
+    }
+
+    /// Build 215 P1 — cold start / reset 路径用. 全量扫 messages 跟 lastSeenTs 比, 重算 unread/mention 计数.
+    /// 调用前提: messages 已经赋值. 不依赖之前 stored unreadCount (会被覆盖).
+    private func recomputeUnreadFromMessages() {
+        let seen = lastSeenTs
+        var unread = 0
+        var mention = 0
+        for r in messages where !r.isHumanSender {
+            if seen.isEmpty || r.ts > seen {
+                unread += 1
+                if isMentioningHuman(r) {
+                    mention += 1
+                }
+            }
+        }
+        unreadCount = unread
+        mentionCount = mention
     }
 
     private func isMentioningHuman(_ message: GroupMessage) -> Bool {

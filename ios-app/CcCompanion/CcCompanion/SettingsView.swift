@@ -577,21 +577,20 @@ struct CcSettingsView: View {
                 groupName: groupName,
                 groupAvatarPath: groupAvatarPath,
                 avatarFilename: Self.groupAvatarFilename,
-                onSave: { newName, newAvatarPath in
+                onSave: { newName, newAvatarPath, clearAvatar in
                     let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
                     groupName = trimmed.isEmpty ? "群聊" : trimmed
-                    if let path = newAvatarPath {
+                    if clearAvatar {
+                        if !groupAvatarPath.isEmpty {
+                            AvatarDiskStore.remove(storedValue: groupAvatarPath)
+                        }
+                        groupAvatarPath = ""
+                    } else if let path = newAvatarPath {
                         groupAvatarPath = path
                     }
                     actionToast = "群聊设置已保存"
                     showGroupSettingsEdit = false
                     NotificationCenter.default.post(name: .ccGroupAppearanceDidChange, object: nil)
-                },
-                onClearAvatar: {
-                    if !groupAvatarPath.isEmpty {
-                        AvatarDiskStore.remove(storedValue: groupAvatarPath)
-                        groupAvatarPath = ""
-                    }
                 },
                 onCancel: { showGroupSettingsEdit = false }
             )
@@ -1413,12 +1412,14 @@ struct GroupSettingsEditSheet: View {
     let groupName: String
     let groupAvatarPath: String
     let avatarFilename: String
-    let onSave: (String, String?) -> Void
-    let onClearAvatar: () -> Void
+    // Build 215 P2 — save callback 现在传 (name, avatarPath?, clearAvatar). clearAvatar=true 时 parent 删磁盘 + AppStorage.
+    // 之前 onClearAvatar 是即时 callback, 跳过"保存才落"闸 — 这次走 draft state 跟正常编辑同款.
+    let onSave: (String, String?, Bool) -> Void
     let onCancel: () -> Void
 
     @Environment(\.dismiss) private var dismiss
     @State private var draftName: String = ""
+    // nil = 没动过 (走 AppStorage 原值) / "" = 用户主动恢复默认 (保存才落) / 非空 = 用户选了新头像 (保存才落)
     @State private var draftAvatarPath: String? = nil
     @State private var pickerPresented: Bool = false
     @State private var pickedImage: UIImage? = nil
@@ -1445,8 +1446,9 @@ struct GroupSettingsEditSheet: View {
                             }
                             if !currentAvatarPath.isEmpty {
                                 Button(role: .destructive) {
+                                    // Build 215 P2 — 只改 draft, 不立刻 onClearAvatar.
+                                    // 用户接着按"保存"才删磁盘 + 清 AppStorage; 按"取消"原值保留.
                                     draftAvatarPath = ""
-                                    onClearAvatar()
                                 } label: {
                                     Label("恢复默认", systemImage: "arrow.uturn.backward")
                                 }
@@ -1469,7 +1471,11 @@ struct GroupSettingsEditSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("保存") {
-                        onSave(draftName, draftAvatarPath)
+                        // Build 215 P2 — draftAvatarPath == "" 表示用户在 sheet 里点了恢复默认.
+                        // 这时传 clearAvatar=true 让 parent 删磁盘 + 清 AppStorage (取消按钮拦得住).
+                        let clearAvatar = (draftAvatarPath == "")
+                        let avatarToSet = clearAvatar ? nil : draftAvatarPath
+                        onSave(draftName, avatarToSet, clearAvatar)
                     }
                     .disabled(draftName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }

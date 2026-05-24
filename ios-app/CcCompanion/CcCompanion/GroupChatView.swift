@@ -15,6 +15,8 @@ struct GroupChatView: View {
     @AppStorage("group_chat_background_path") private var groupBackgroundPath: String = ""
     @State private var searchVisible = false
     @State private var searchText = ""
+    // Build 215 P3 — 搜索 filter chip (跟 ChatView 搜索 chip 对齐 + 日期)
+    @State private var searchFilter: GroupSearchFilter = .all
     @State private var showFavorites = false
     @State private var favoriteMessageIds: Set<String> = GroupFavoritesStore.ids()
 
@@ -30,9 +32,15 @@ struct GroupChatView: View {
     }
 
     private var visibleMessages: [GroupMessage] {
+        guard searchVisible else { return store.messages }
         let q = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard searchVisible, !q.isEmpty else { return store.messages }
-        return store.messages.filter { message in
+        var pool = store.messages
+        // Build 215 P3 — filter chip 先过, 再过 text query
+        if searchFilter != .all {
+            pool = pool.filter { searchFilter.matches($0) }
+        }
+        guard !q.isEmpty else { return pool }
+        return pool.filter { message in
             GroupMessageSearch.matches(message, member: store.member(for: message.senderId), query: q)
         }
     }
@@ -47,15 +55,41 @@ struct GroupChatView: View {
             customHeader
 
             GroupChatStatusStrip(store: store)
+            // Build 215 P3 — 搜索栏 + filter chip (copy ChatView 模式 ChatView.swift:2704-2743)
             if searchVisible {
-                GroupSearchBar(
-                    text: $searchText,
-                    visibleCount: visibleMessages.count,
-                    totalCount: store.messages.count,
-                    onClose: {
-                        searchText = ""
-                        searchVisible = false
+                HStack(spacing: 8) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "magnifyingglass")
+                            .foregroundStyle(Color.ccTextDim)
+                        TextField("搜对话 / 文件名", text: $searchText)
+                            .textFieldStyle(.plain)
+                            .submitLabel(.search)
+                        if !searchText.isEmpty {
+                            Button {
+                                searchText = ""
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .foregroundStyle(Color.ccTextDim)
+                            }
+                            .buttonStyle(.plain)
+                        }
                     }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                    .background(Color.ccCard)
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    Button("取消") {
+                        searchVisible = false
+                        searchText = ""
+                        searchFilter = .all
+                    }
+                    .foregroundStyle(Color.ccAccent)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                GroupSearchFilterBar(
+                    selected: searchFilter,
+                    onSelect: { searchFilter = $0 }
                 )
             }
 
@@ -686,6 +720,77 @@ private struct AgentMentionPicker: View {
             }
         }
         .presentationDetents([.medium, .large])
+    }
+}
+
+// MARK: - Search Filter (build 215 P3)
+
+/// 群聊搜索 filter chip — 跟 ChatView SearchFilter 对齐 (全部 / 图片视频 / 文件 / 链接 / 音乐音频 / 日期).
+/// 当前 GroupMessage 没有 attachment 字段, 图片视频 / 文件 / 音乐音频 只能走文本 URL 后缀粗匹配 (大概率空 result).
+/// 链接走 http(s) URL 检测真能用. 日期 chip 暂只切 filter 不弹 date picker (后续 spec).
+enum GroupSearchFilter: String, CaseIterable, Identifiable {
+    case all = "全部"
+    case image = "图片视频"
+    case file = "文件"
+    case link = "链接"
+    case audio = "音乐音频"
+    case date = "日期"
+    var id: String { rawValue }
+
+    func matches(_ message: GroupMessage) -> Bool {
+        let text = message.text.lowercased()
+        switch self {
+        case .all:
+            return true
+        case .image:
+            // 文本中含图片扩展名 URL 粗匹配
+            return text.range(of: #"https?://\S+\.(png|jpg|jpeg|gif|webp|heic|mp4|mov)\b"#, options: .regularExpression) != nil
+        case .file:
+            return text.range(of: #"https?://\S+\.(pdf|zip|doc|docx|xls|xlsx|ppt|pptx|txt|md|json|csv)\b"#, options: .regularExpression) != nil
+        case .link:
+            return text.range(of: #"https?://"#, options: .regularExpression) != nil
+        case .audio:
+            return text.range(of: #"https?://\S+\.(mp3|wav|m4a|aac|flac|ogg)\b"#, options: .regularExpression) != nil
+        case .date:
+            // 日期 chip 当前作 placeholder — 不在前端做日期过滤, 全显示. 后续接 date picker spec
+            return true
+        }
+    }
+}
+
+private struct GroupSearchFilterBar: View {
+    let selected: GroupSearchFilter
+    let onSelect: (GroupSearchFilter) -> Void
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(GroupSearchFilter.allCases) { filter in
+                    Button {
+                        onSelect(filter)
+                    } label: {
+                        Text(filter.rawValue)
+                            .font(.footnote.weight(selected == filter ? .semibold : .regular))
+                            .foregroundStyle(selected == filter ? Color.white : Color.ccText)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 6)
+                            .background(
+                                Capsule()
+                                    .fill(selected == filter ? Color.ccAccent : Color.ccCard)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+        }
+        .background(Color.ccBg)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(Color.ccCard)
+                .frame(height: 0.5)
+        }
     }
 }
 
