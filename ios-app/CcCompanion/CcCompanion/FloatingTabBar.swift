@@ -135,6 +135,9 @@ struct FloatingTabBar: View {
             .id(item.id)
         }
         .buttonStyle(.plain)
+        // Build 218 r3 — XCUITest hook: stable identifier per tab so smoke tests
+        // can tap `app.buttons["tab-\(item.id)"]` regardless of locale or icon name.
+        .accessibilityIdentifier("tab-\(item.id)")
     }
 
     @ViewBuilder

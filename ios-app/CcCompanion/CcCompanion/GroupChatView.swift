@@ -1028,6 +1028,7 @@ private struct GroupInputBar: View {
                     .foregroundStyle(Color.ccTextDim)
             }
             .disabled(sending)
+            .accessibilityIdentifier("group-upload-plus")
 
             // 图片按钮 — 摘出加号菜单, 跟 ChatInputBar 同款放第二位 (line 3223)
             Button { onImage() } label: {
@@ -1036,6 +1037,7 @@ private struct GroupInputBar: View {
                     .foregroundStyle(Color.ccTextDim)
             }
             .disabled(sending)
+            .accessibilityIdentifier("group-upload-image")
 
             // @ 按钮 — 群聊特有, 跟 ChatInputBar 图片按钮平级
             Button { onAt() } label: {

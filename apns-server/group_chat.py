@@ -75,21 +75,70 @@ ROSTER: list[dict[str, Any]] = [
 
 # Load optional user-supplied roster + alias config from `agents_config.json`
 # (gitignored). Falls back to defaults above if the file does not exist.
+#
+# Build 218 r3 item 4 — also merge user_overrides/group_member_{additions,removals}.json
+# so adds/removes from the iOS Settings sheet take effect without a server restart.
 def _load_agents_config() -> None:
     global ROSTER, ROSTER_BY_ID, REPLY_AGENT_IDS, MENTION_ALIASES
-    cfg_path = Path(__file__).resolve().parent / "agents_config.json"
-    if not cfg_path.exists():
-        return
-    try:
-        data = json.loads(cfg_path.read_text(encoding="utf-8"))
-        if isinstance(data.get("agents"), list) and data["agents"]:
-            ROSTER = data["agents"]
-            ROSTER_BY_ID = {m["id"]: m for m in ROSTER}
-            REPLY_AGENT_IDS = [m["id"] for m in ROSTER if m.get("can_reply")]
-        if isinstance(data.get("mention_aliases"), dict):
-            MENTION_ALIASES = dict(data["mention_aliases"])
-    except Exception:
-        pass
+    here = Path(__file__).resolve().parent
+    cfg_path = here / "agents_config.json"
+    if cfg_path.exists():
+        try:
+            data = json.loads(cfg_path.read_text(encoding="utf-8"))
+            if isinstance(data.get("agents"), list) and data["agents"]:
+                ROSTER = data["agents"]
+            if isinstance(data.get("mention_aliases"), dict):
+                MENTION_ALIASES = dict(data["mention_aliases"])
+        except Exception:
+            pass
+
+    # Merge user-supplied additions/removals from iOS Settings sheet.
+    overrides_dir = here / "user_overrides"
+    add_path = overrides_dir / "group_member_additions.json"
+    if add_path.exists():
+        try:
+            additions = json.loads(add_path.read_text(encoding="utf-8") or "[]")
+            if isinstance(additions, list):
+                existing_ids = {m.get("id") for m in ROSTER}
+                for rec in additions:
+                    aid = rec.get("id")
+                    if not aid or aid in existing_ids:
+                        continue
+                    ROSTER.append(rec)
+                    existing_ids.add(aid)
+                    # Self-alias so @<id> mentions resolve. Also alias display_name lowercased.
+                    MENTION_ALIASES[aid.lower()] = aid
+                    dn = (rec.get("display_name") or "").strip().lower()
+                    if dn and dn not in MENTION_ALIASES:
+                        MENTION_ALIASES[dn] = aid
+        except Exception:
+            pass
+
+    rm_path = overrides_dir / "group_member_removals.json"
+    if rm_path.exists():
+        try:
+            removals = json.loads(rm_path.read_text(encoding="utf-8") or "[]")
+            if isinstance(removals, list):
+                removed = set(removals)
+                ROSTER = [m for m in ROSTER if m.get("id") not in removed]
+                for rid in removed:
+                    # Drop aliases that point to a removed id; also drop alias keyed by the id itself.
+                    for key in [k for k, v in MENTION_ALIASES.items() if v == rid or k == rid.lower()]:
+                        MENTION_ALIASES.pop(key, None)
+        except Exception:
+            pass
+
+    ROSTER_BY_ID = {m["id"]: m for m in ROSTER}
+    REPLY_AGENT_IDS = [m["id"] for m in ROSTER if m.get("can_reply")]
+
+
+def reload_agents_config() -> None:
+    """Public entry: re-merge agents_config.json + user_overrides files into live ROSTER.
+
+    Called by push.py /group/members/{add,delete} handlers after they persist
+    user-override files so iOS-side adds/removes route mentions immediately.
+    """
+    _load_agents_config()
 
 
 ROSTER_BY_ID = {m["id"]: m for m in ROSTER}

@@ -53,7 +53,7 @@ from device_token_store import DeviceTokenStore
 from task_queue import TaskQueue
 from chat_history import ChatHistory, EphemeralTaskBuffer
 from diary_stream import DiaryStream
-from group_chat import GroupChatStore
+from group_chat import GroupChatStore, reload_agents_config as _reload_roster
 from calendar_store import CalendarStore, CATEGORIES, CATEGORY_LABELS
 from rp_history import RPHistory, validate_sid as validate_rp_sid
 from diary import Diary
@@ -2483,7 +2483,9 @@ class PushHandler(BaseHTTPRequestHandler):
             existing = [r for r in existing if r.get("id") != member_id]
             existing.append(record)
             path.write_text(json.dumps(existing, ensure_ascii=False, indent=2), encoding="utf-8")
-            self._send_json(200, {"ok": True, "member": record})
+            # Build 218 r3 item 4 — hot-reload roster so mentions route to the new agent immediately.
+            _reload_roster()
+            self._send_json(200, {"ok": True, "member": record, "roster_reloaded": True})
         except Exception as e:
             self._send_json(500, {"ok": False, "error": str(e)})
 
@@ -2500,7 +2502,9 @@ class PushHandler(BaseHTTPRequestHandler):
             if member_id not in existing:
                 existing.append(member_id)
             path.write_text(json.dumps(existing, ensure_ascii=False, indent=2), encoding="utf-8")
-            self._send_json(200, {"ok": True, "removed": member_id})
+            # Build 218 r3 item 4 — hot-reload roster so mentions stop routing to the removed agent.
+            _reload_roster()
+            self._send_json(200, {"ok": True, "removed": member_id, "roster_reloaded": True})
         except Exception as e:
             self._send_json(500, {"ok": False, "error": str(e)})
 

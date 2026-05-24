@@ -14,6 +14,25 @@ struct CcCompanionApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
     init() {
+        // Build 218 r3 — XCUITest hook: when launched with UITEST_GROUP_UPLOAD_SMOKE=1
+        // pre-populate UserDefaults so the test skips onboarding + lands directly on the
+        // group chat tab pointed at the local demo server (8796). Has no effect at runtime.
+        if ProcessInfo.processInfo.environment["UITEST_GROUP_UPLOAD_SMOKE"] == "1" {
+            // Onboarding flag + feature toggle live in standard suite (per @AppStorage usage).
+            let std = UserDefaults.standard
+            std.set(true, forKey: "cc_onboarding_completed")
+            std.set(true, forKey: "feature_group_view")
+            std.set("",   forKey: "chat_last_seen_ts")
+            // Server endpoint list lives in the app group suite (per CcServerConfig).
+            if let ag = UserDefaults(suiteName: CcServerConfig.appGroup) {
+                ag.set(["http://127.0.0.1:8796"], forKey: "serverURLList")
+                ag.set(["UITestDemo"],             forKey: "serverLabelList")
+                ag.set(0,                          forKey: "serverActiveIndex")
+                ag.set("http://127.0.0.1:8796",    forKey: "serverURL")
+            }
+            // Shared secret usually lives in Keychain; set it via the official setter.
+            CcServerConfig.setSharedSecret("597e2950d16f493c9444a152ecc564a3")
+        }
         // Phase multi-server fallback (2026-05-11) — 旧版单 serverURL 一次性迁到新 endpoints 列表.
         CcServerConfig.migrateLegacySharedSecretIfNeeded()
         CcServerConfig.migrateLegacySingleURLIfNeeded()

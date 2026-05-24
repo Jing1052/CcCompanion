@@ -7,13 +7,28 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		8598F357E7660F9BF759C5A8 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 8EBF609F607C4C7653AC671F /* Foundation.framework */; };
+		87F5CCE1AD8C55B1D1F727E6 /* GroupUploadSmokeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A20EB924C3A2171FC877672 /* GroupUploadSmokeTests.swift */; };
 		8BB226FC2FACC1CE0093817E /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = 8BB226FB2FACC1CE0093817E /* GRDB */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		052283F3596BB7FF35F8B107 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 8B9454852FA08E20004A73FB /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 8B94548C2FA08E20004A73FB;
+			remoteInfo = CcCompanion;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
+		6A20EB924C3A2171FC877672 /* GroupUploadSmokeTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GroupUploadSmokeTests.swift; sourceTree = "<group>"; };
 		8B94548D2FA08E20004A73FB /* CcCompanion.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CcCompanion.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		8B9454C12FA2EDE2004A73FB /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
 		8B9454C32FA2EDE2004A73FB /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
+		8EBF609F607C4C7653AC671F /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS18.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
+		E30AFBDB68C6DB70158494C4 /* CcCompanionUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CcCompanionUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -46,15 +61,33 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		F49BBDE4228E1C2AE24F028D /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				8598F357E7660F9BF759C5A8 /* Foundation.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		7DDCFC84D04A93D2823B1625 /* CcCompanionUITests */ = {
+			isa = PBXGroup;
+			children = (
+				6A20EB924C3A2171FC877672 /* GroupUploadSmokeTests.swift */,
+			);
+			name = CcCompanionUITests;
+			path = CcCompanionUITests;
+			sourceTree = "<group>";
+		};
 		8B9454842FA08E20004A73FB = {
 			isa = PBXGroup;
 			children = (
 				8B94548F2FA08E20004A73FB /* CcCompanion */,
 				8B9454C02FA2EDE2004A73FB /* Frameworks */,
 				8B94548E2FA08E20004A73FB /* Products */,
+				7DDCFC84D04A93D2823B1625 /* CcCompanionUITests */,
 			);
 			sourceTree = "<group>";
 		};
@@ -62,6 +95,7 @@
 			isa = PBXGroup;
 			children = (
 				8B94548D2FA08E20004A73FB /* CcCompanion.app */,
+				E30AFBDB68C6DB70158494C4 /* CcCompanionUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -71,13 +105,40 @@
 			children = (
 				8B9454C12FA2EDE2004A73FB /* WidgetKit.framework */,
 				8B9454C32FA2EDE2004A73FB /* SwiftUI.framework */,
+				B7B513C583237FED017E3EBD /* iOS */,
 			);
 			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		B7B513C583237FED017E3EBD /* iOS */ = {
+			isa = PBXGroup;
+			children = (
+				8EBF609F607C4C7653AC671F /* Foundation.framework */,
+			);
+			name = iOS;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		7707E16D086B5FCA423F9866 /* CcCompanionUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 97223B0145DD5B28E15E5D79 /* Build configuration list for PBXNativeTarget "CcCompanionUITests" */;
+			buildPhases = (
+				BD7F62D10E614B463B6FBD3D /* Sources */,
+				F49BBDE4228E1C2AE24F028D /* Frameworks */,
+				3FC4B5474EEA41AB5AB58C7A /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				630D836FF1F18CA9FD2E48C0 /* PBXTargetDependency */,
+			);
+			name = CcCompanionUITests;
+			productName = CcCompanionUITests;
+			productReference = E30AFBDB68C6DB70158494C4 /* CcCompanionUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 		8B94548C2FA08E20004A73FB /* CcCompanion */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 8B9454982FA08E21004A73FB /* Build configuration list for PBXNativeTarget "CcCompanion" */;
@@ -131,7 +192,7 @@
 			mainGroup = 8B9454842FA08E20004A73FB;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				8BB226FA2FACC1CE0093817E /* XCRemoteSwiftPackageReference "GRDB" */,
+				8BB226FA2FACC1CE0093817E /* XCRemoteSwiftPackageReference "GRDB.swift" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 8B94548E2FA08E20004A73FB /* Products */;
@@ -139,11 +200,19 @@
 			projectRoot = "";
 			targets = (
 				8B94548C2FA08E20004A73FB /* CcCompanion */,
+				7707E16D086B5FCA423F9866 /* CcCompanionUITests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		3FC4B5474EEA41AB5AB58C7A /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		8B94548B2FA08E20004A73FB /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -161,7 +230,24 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		BD7F62D10E614B463B6FBD3D /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				87F5CCE1AD8C55B1D1F727E6 /* GroupUploadSmokeTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		630D836FF1F18CA9FD2E48C0 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			name = CcCompanion;
+			target = 8B94548C2FA08E20004A73FB /* CcCompanion */;
+			targetProxy = 052283F3596BB7FF35F8B107 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		01A9DDD7AA654B9AA1F5C5D6 /* Release */ = {
@@ -202,6 +288,25 @@
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Release;
+		};
+		4EA661BDFE220EA02EE3CA3C /* CcRelease */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.starryfield.cccompanion.uitests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = CcCompanion;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = CcRelease;
 		};
 		8B9454962FA08E21004A73FB /* Debug */ = {
 			isa = XCBuildConfiguration;
@@ -405,6 +510,43 @@
 			};
 			name = CcRelease;
 		};
+		A206C82CE05181C77A9BA7D4 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.starryfield.cccompanion.uitests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = CcCompanion;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		B43D6FAD091C0B85C04729A7 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.starryfield.cccompanion.uitests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = CcCompanion;
+			};
+			name = Debug;
+		};
 		BD9FAAC7AAAB48918275E44E /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -485,10 +627,20 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
+		97223B0145DD5B28E15E5D79 /* Build configuration list for PBXNativeTarget "CcCompanionUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A206C82CE05181C77A9BA7D4 /* Release */,
+				B43D6FAD091C0B85C04729A7 /* Debug */,
+				4EA661BDFE220EA02EE3CA3C /* CcRelease */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
-		8BB226FA2FACC1CE0093817E /* XCRemoteSwiftPackageReference "GRDB" */ = {
+		8BB226FA2FACC1CE0093817E /* XCRemoteSwiftPackageReference "GRDB.swift" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/groue/GRDB.swift";
 			requirement = {
@@ -501,7 +653,7 @@
 /* Begin XCSwiftPackageProductDependency section */
 		8BB226FB2FACC1CE0093817E /* GRDB */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 8BB226FA2FACC1CE0093817E /* XCRemoteSwiftPackageReference "GRDB" */;
+			package = 8BB226FA2FACC1CE0093817E /* XCRemoteSwiftPackageReference "GRDB.swift" */;
 			productName = GRDB;
 		};
 /* End XCSwiftPackageProductDependency section */
