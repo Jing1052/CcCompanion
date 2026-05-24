@@ -6,6 +6,10 @@
 //
 
 import SwiftUI
+import PhotosUI
+#if canImport(UIKit)
+import UIKit
+#endif
 
 struct GroupChatView: View {
     @ObservedObject var store: GroupStore
@@ -30,6 +34,11 @@ struct GroupChatView: View {
     @State private var inputToast: String = ""
     // Build 217 Q1 — 引用 quoting state (跟 ChatView vm.quoting 同款), 发送时带 reply_to, 不立刻发让用户加文本
     @State private var quoting: GroupMessage? = nil
+    // Build 217-patch-A T1 — upload picker state (PHPicker / Camera / DocumentPicker, 跟 ChatView 同模式)
+    @State private var photoItems: [PhotosPickerItem] = []
+    @State private var showImagePicker: Bool = false
+    @State private var showCameraPicker: Bool = false
+    @State private var showFileImporter: Bool = false
 
     private var chatBodySize: CGFloat {
         chatFontLevel == "small" ? 15 : chatFontLevel == "large" ? 18 : 17
@@ -219,15 +228,9 @@ struct GroupChatView: View {
                 inputFocused: $inputFocused,
                 onSend: { commitSend() },
                 onAt: { showAgentPicker = true },
-                onPlusFile: {
-                    inputToast = "T1 backend wire pending — 文件发送待接 /group/append"
-                },
-                onPlusCamera: {
-                    inputToast = "T1 backend wire pending — 拍照待接 /group/append"
-                },
-                onImage: {
-                    inputToast = "T1 backend wire pending — 图片待接 /group/append"
-                }
+                onPlusFile: { showFileImporter = true },
+                onPlusCamera: { showCameraPicker = true },
+                onImage: { showImagePicker = true }
             )
         }
         // Build 215 S1 — 顶层 ZStack 加群聊背景图渲染 (复用 ChatView 模式)
@@ -253,6 +256,54 @@ struct GroupChatView: View {
         .sheet(isPresented: $showFavorites) {
             NavigationStack { GroupFavoritesView() }
         }
+        // Build 217-patch-A T1 — image / camera / file pickers (跟 ChatView 同模式)
+        .photosPicker(
+            isPresented: $showImagePicker,
+            selection: $photoItems,
+            maxSelectionCount: 9,
+            matching: .images
+        )
+        .onChange(of: photoItems) { _, newItems in
+            guard !newItems.isEmpty else { return }
+            let items = newItems
+            photoItems = []
+            Task {
+                for item in items {
+                    if let data = try? await item.loadTransferable(type: Data.self) {
+                        await uploadAttachmentData(data, filename: "image_\(Int(Date().timeIntervalSince1970)).jpg")
+                    }
+                }
+            }
+        }
+        .fileImporter(
+            isPresented: $showFileImporter,
+            allowedContentTypes: [.item],
+            allowsMultipleSelection: true
+        ) { result in
+            switch result {
+            case .success(let urls):
+                Task {
+                    for url in urls {
+                        let scoped = url.startAccessingSecurityScopedResource()
+                        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+                        guard let data = try? Data(contentsOf: url) else { continue }
+                        await uploadAttachmentData(data, filename: url.lastPathComponent)
+                    }
+                }
+            case .failure(let err):
+                inputToast = "选择文件失败: \(err.localizedDescription)"
+            }
+        }
+        #if os(iOS)
+        .fullScreenCover(isPresented: $showCameraPicker) {
+            CameraPicker { data in
+                Task {
+                    await uploadAttachmentData(Data(data), filename: "camera_\(Int(Date().timeIntervalSince1970)).jpg")
+                }
+            }
+            .ignoresSafeArea()
+        }
+        #endif
         .sheet(isPresented: $showAgentPicker) {
             AgentMentionPicker(
                 members: store.agentMembers,
@@ -379,6 +430,36 @@ struct GroupChatView: View {
             draftText += " " + token
         }
         inputFocused = true
+    }
+
+    /// Build 217-patch-A T1 — 拿到 PHPicker/Camera/FileImporter 的 Data, 走 /group/upload.
+    /// caption 走当前 draftText (空 OK), mentions 解析 draftText, replyTo 走 quoting state.
+    /// 上传完清 draft + quoting. inputToast 显示进度 / 失败.
+    private func uploadAttachmentData(_ data: Data, filename: String) async {
+        let caption = draftText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let mentions = resolveMentions(in: caption)
+        let replyTo = quoting?.id
+        await MainActor.run {
+            sending = true
+            inputToast = "上传中 \(filename)..."
+        }
+        let ok = await store.uploadUserAttachment(
+            data: data,
+            filename: filename,
+            caption: caption,
+            mentions: mentions,
+            replyTo: replyTo
+        )
+        await MainActor.run {
+            sending = false
+            if ok {
+                draftText = ""
+                quoting = nil
+                inputToast = ""
+            } else {
+                inputToast = store.lastError ?? "上传失败"
+            }
+        }
     }
 
     private func commitSend() {
@@ -544,22 +625,29 @@ private struct GroupMessageRow: View {
                         .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                     }
 
-                    highlightedText(message.text)
-                        .font(.ccSerifAdaptive(size: bodySize))
-                        .foregroundStyle(Color.ccText)
-                        .lineSpacing(3)
-                        .lineLimit(nil)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .background(
-                            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                .fill(bubbleColor)
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                .stroke(Color.ccTextDim.opacity(0.08), lineWidth: 0.5)
-                        )
+                    // Build 217-patch-A T1 — attachment preview (image inline / file cell)
+                    if let attachmentURL = message.attachmentFullURL() {
+                        attachmentView(url: attachmentURL)
+                    }
+
+                    if !message.text.isEmpty {
+                            highlightedText(message.text)
+                            .font(.ccSerifAdaptive(size: bodySize))
+                            .foregroundStyle(Color.ccText)
+                            .lineSpacing(3)
+                            .lineLimit(nil)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(
+                                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                    .fill(bubbleColor)
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                    .stroke(Color.ccTextDim.opacity(0.08), lineWidth: 0.5)
+                            )
+                    }
                 }
                 .frame(maxWidth: 330, alignment: message.isHumanSender ? .trailing : .leading)
             }
@@ -596,6 +684,59 @@ private struct GroupMessageRow: View {
 
     private var avatar: some View {
         GroupAvatarView(member: member, size: 32)
+    }
+
+    /// Build 217-patch-A T1 — attachment 渲染. image type → CachedImage 缩略, file/audio/video → 文件 cell.
+    @ViewBuilder
+    private func attachmentView(url: URL) -> some View {
+        let atype = message.attachmentType ?? "file"
+        if atype == "image" {
+            CachedImage(url: url) { img in
+                img.resizable().scaledToFit()
+            } placeholder: {
+                ZStack {
+                    Color.ccCard
+                    ProgressView().controlSize(.small)
+                }
+            }
+            .frame(maxWidth: 240, maxHeight: 320)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(Color.ccTextDim.opacity(0.1), lineWidth: 0.5)
+            )
+        } else {
+            HStack(spacing: 10) {
+                Image(systemName: atype == "audio" ? "waveform" : (atype == "video" ? "play.rectangle.fill" : "doc.fill"))
+                    .font(.ccSerifAdaptive(size: 22, weight: .semibold))
+                    .foregroundStyle(Color.ccAccent)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(message.attachmentFilename ?? "附件")
+                        .font(.ccSerifAdaptive(size: 13, weight: .medium))
+                        .foregroundStyle(Color.ccText)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Text(atype.uppercased())
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(Color.ccTextDim)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .frame(maxWidth: 280, alignment: .leading)
+            .background(Color.ccCard)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(Color.ccAccent.opacity(0.15), lineWidth: 0.5)
+            )
+            .onTapGesture {
+                #if canImport(UIKit)
+                UIApplication.shared.open(url)
+                #endif
+            }
+        }
     }
 
     @ViewBuilder

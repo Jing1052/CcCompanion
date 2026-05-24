@@ -266,13 +266,18 @@ class GroupChatStore:
         task_id: str | None = None,
         parent_task_id: str | None = None,
         owner: str | None = None,
+        attachment_url: str | None = None,
+        attachment_filename: str | None = None,
+        attachment_type: str | None = None,
     ) -> dict[str, Any]:
         member = self.member(sender_id)
         if not member:
             raise ValueError(f"unknown sender_id: {sender_id}")
         text = str(text or "").strip()
-        if not text:
-            raise ValueError("text required")
+        # Build 217-patch-A: attachment-only message (image / file pure upload)
+        # allowed — text may be empty when attachment is set.
+        if not text and not attachment_url:
+            raise ValueError("text or attachment required")
         message_type = str(message_type or "chat").strip().lower()
         if message_type not in MESSAGE_TYPES:
             raise ValueError(f"bad message_type: {message_type}")
@@ -295,6 +300,9 @@ class GroupChatStore:
             "task_id": task_id,
             "parent_task_id": parent_task_id,
             "owner": owner,
+            "attachment_url": attachment_url,
+            "attachment_filename": attachment_filename,
+            "attachment_type": attachment_type,
         }
         with self._lock:
             ts = self._next_ts()
@@ -315,6 +323,10 @@ class GroupChatStore:
         out.setdefault("task_id", None)
         out.setdefault("parent_task_id", None)
         out.setdefault("owner", None)
+        # Build 217-patch-A: backfill attachment fields on legacy records
+        out.setdefault("attachment_url", None)
+        out.setdefault("attachment_filename", None)
+        out.setdefault("attachment_type", None)
         return out
 
     def _iter_records(self) -> list[dict[str, Any]]:

@@ -24,6 +24,10 @@ nonisolated struct GroupMessage: Identifiable, Codable, Hashable, Sendable {
     let taskId: String?
     let parentTaskId: String?
     let owner: String?
+    // Build 217-patch-A — attachment fields (image / file / video / audio)
+    let attachmentUrl: String?
+    let attachmentFilename: String?
+    let attachmentType: String?
 
     enum CodingKeys: String, CodingKey {
         case id, ts, text, mentions, source, owner
@@ -35,6 +39,9 @@ nonisolated struct GroupMessage: Identifiable, Codable, Hashable, Sendable {
         case messageType = "message_type"
         case taskId = "task_id"
         case parentTaskId = "parent_task_id"
+        case attachmentUrl = "attachment_url"
+        case attachmentFilename = "attachment_filename"
+        case attachmentType = "attachment_type"
     }
 
     init(
@@ -51,7 +58,10 @@ nonisolated struct GroupMessage: Identifiable, Codable, Hashable, Sendable {
         messageType: String = "chat",
         taskId: String? = nil,
         parentTaskId: String? = nil,
-        owner: String? = nil
+        owner: String? = nil,
+        attachmentUrl: String? = nil,
+        attachmentFilename: String? = nil,
+        attachmentType: String? = nil
     ) {
         self.id = id
         self.ts = ts
@@ -67,6 +77,9 @@ nonisolated struct GroupMessage: Identifiable, Codable, Hashable, Sendable {
         self.taskId = taskId
         self.parentTaskId = parentTaskId
         self.owner = owner
+        self.attachmentUrl = attachmentUrl
+        self.attachmentFilename = attachmentFilename
+        self.attachmentType = attachmentType
     }
 
     init(from decoder: Decoder) throws {
@@ -85,9 +98,19 @@ nonisolated struct GroupMessage: Identifiable, Codable, Hashable, Sendable {
         self.taskId = try c.decodeIfPresent(String.self, forKey: .taskId)
         self.parentTaskId = try c.decodeIfPresent(String.self, forKey: .parentTaskId)
         self.owner = try c.decodeIfPresent(String.self, forKey: .owner)
+        self.attachmentUrl = try c.decodeIfPresent(String.self, forKey: .attachmentUrl)
+        self.attachmentFilename = try c.decodeIfPresent(String.self, forKey: .attachmentFilename)
+        self.attachmentType = try c.decodeIfPresent(String.self, forKey: .attachmentType)
     }
 
     var isHumanSender: Bool { senderId == "amian" }
+
+    /// Build 217-patch-A — resolve attachment_url (server-relative or http) to absolute URL.
+    func attachmentFullURL() -> URL? {
+        guard let path = attachmentUrl, !path.isEmpty else { return nil }
+        if path.hasPrefix("http") { return URL(string: path) }
+        return URL(string: CcServerConfig.serverURL.absoluteString + path)
+    }
     var isShip: Bool { messageType == "ship" }
     var isTask: Bool { messageType == "task" }
     var isBlock: Bool { messageType == "block" }

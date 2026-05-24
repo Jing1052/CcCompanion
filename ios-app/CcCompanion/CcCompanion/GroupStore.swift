@@ -70,6 +70,43 @@ actor GroupNetworkClient {
         return true
     }
 
+    /// Build 217-patch-A — upload binary attachment (image / file / video) to /group/upload.
+    /// 跟 /chat/upload 同款: raw POST body + query string filename/sender_id/text/mentions/reply_to.
+    /// Returns the new GroupMessage record server created.
+    @discardableResult
+    func uploadAttachment(
+        data: Data,
+        filename: String,
+        senderId: String,
+        text: String,
+        mentions: [String],
+        replyTo: String?
+    ) async throws -> GroupMessage? {
+        var components = URLComponents(url: CcServerConfig.serverURL.appendingPathComponent("group/upload"), resolvingAgainstBaseURL: false)
+        var items: [URLQueryItem] = [
+            URLQueryItem(name: "filename", value: filename),
+            URLQueryItem(name: "sender_id", value: senderId),
+            URLQueryItem(name: "text", value: text),
+        ]
+        if !mentions.isEmpty {
+            items.append(URLQueryItem(name: "mentions", value: mentions.joined(separator: ",")))
+        }
+        if let replyTo, !replyTo.isEmpty {
+            items.append(URLQueryItem(name: "reply_to", value: replyTo))
+        }
+        components?.queryItems = items
+        guard let finalURL = components?.url else { throw URLError(.badURL) }
+        var request = CcServerConfig.authenticatedRequest(url: finalURL)
+        request.httpMethod = "POST"
+        request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
+        request.setValue("\(data.count)", forHTTPHeaderField: "Content-Length")
+        request.timeoutInterval = 60
+        let (respData, response) = try await session.upload(for: request, from: data)
+        try Self.validate(response: response)
+        struct UploadResponse: Codable { let ok: Bool; let record: GroupMessage? }
+        return (try? JSONDecoder().decode(UploadResponse.self, from: respData))?.record
+    }
+
     func fetchPoll(since: String?, limit: Int) async throws -> GroupPollResponse {
         let url = CcServerConfig.serverURL.appendingPathComponent("group/poll")
         var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
@@ -173,6 +210,32 @@ final class GroupStore: ObservableObject {
             return true
         } catch {
             lastError = "发送失败: \(error.localizedDescription)"
+            return false
+        }
+    }
+
+    /// Build 217-patch-A — 上传 attachment (图片 / 文件 / 视频 / 拍照) 到 /group/upload.
+    /// 走 amian sender + caption (空 OK). 上传完触发一次 fetchMessages 拉回来.
+    func uploadUserAttachment(
+        data: Data,
+        filename: String,
+        caption: String,
+        mentions: [String],
+        replyTo: String?
+    ) async -> Bool {
+        do {
+            _ = try await client.uploadAttachment(
+                data: data,
+                filename: filename,
+                senderId: "amian",
+                text: caption,
+                mentions: mentions,
+                replyTo: replyTo
+            )
+            await fetchMessages(reset: false)
+            return true
+        } catch {
+            lastError = "上传失败: \(error.localizedDescription)"
             return false
         }
     }

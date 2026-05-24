@@ -897,6 +897,11 @@ class PushHandler(BaseHTTPRequestHandler):
         if self.path.startswith("/chat/upload"):
             self._handle_chat_upload()
             return
+        # Build 217-patch-A: /group/upload mirrors /chat/upload but writes to
+        # group_chat with sender_id (default "amian") instead of chat.role.
+        if self.path.startswith("/group/upload"):
+            self._handle_group_upload()
+            return
         if self.path == "/diary/upload":
             self._handle_diary_upload()
             return
@@ -3712,6 +3717,108 @@ class PushHandler(BaseHTTPRequestHandler):
                     "record": rec,
                 })
                 return
+
+        self._send_json(200, {"ok": True, "record": rec})
+
+    def _handle_group_upload(self):
+        """Build 217-patch-A — group chat 上传通道.
+
+        raw POST + query string (跟 /chat/upload 同款 header non-ASCII fall-back):
+          ?filename=foo.jpg&sender_id=amian&text=caption&mentions=opia,shu&reply_to=<grp_id>
+        body: raw bytes (image / file / video)
+
+        落盘到 attachments_dir (跟 chat 共享), 然后 group_chat.append() 入库.
+        attachment-only message 允许 (text 可空).
+        """
+        import uuid as _uuid
+        from urllib.parse import urlparse, parse_qs, unquote
+
+        qs = parse_qs(urlparse(self.path).query)
+        filename = (qs.get("filename", [None])[0]
+                    or self.headers.get("X-Filename")
+                    or "upload.bin")
+        sender_id = (qs.get("sender_id", [None])[0]
+                     or self.headers.get("X-Sender-Id")
+                     or "amian")
+        text = (qs.get("text", [None])[0]
+                or self.headers.get("X-Text")
+                or "")
+        reply_to = (qs.get("reply_to", [None])[0]
+                    or self.headers.get("X-Reply-To")
+                    or None)
+        mentions_raw = qs.get("mentions", [None])[0] or self.headers.get("X-Mentions") or ""
+        mentions_list = [m for m in mentions_raw.split(",") if m.strip()] if mentions_raw else []
+
+        try:
+            if filename:
+                filename = unquote(filename)
+        except Exception:
+            pass
+
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+        except Exception:
+            length = 0
+        if length <= 0 or length > 50 * 1024 * 1024:
+            self._send_json(400, {"error": "invalid content-length (max 50MB)"})
+            return
+
+        ext = Path(filename).suffix.lower()
+        image_exts = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".heic", ".heif"}
+        video_exts = {".mp4", ".mov", ".m4v"}
+        audio_exts = {".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg"}
+        if ext in image_exts:
+            atype = "image"
+        elif ext in video_exts:
+            atype = "video"
+        elif ext in audio_exts:
+            atype = "audio"
+        else:
+            atype = "file"
+
+        stored_name = f"{_uuid.uuid4().hex}{ext}"
+        stored_path = self.state.attachments_dir / stored_name
+
+        try:
+            with stored_path.open("wb") as f:
+                remaining = length
+                while remaining > 0:
+                    chunk = self.rfile.read(min(remaining, 65536))
+                    if not chunk:
+                        break
+                    f.write(chunk)
+                    remaining -= len(chunk)
+        except Exception as e:
+            logger.exception("group upload write fail")
+            self._send_json(500, {"error": f"write fail: {e}"})
+            return
+
+        attachment_url = f"/attachments/{stored_name}"
+
+        normalized_mentions = self.state.group_chat.normalize_mentions(mentions_list, text)
+        targets = self.state.group_chat.targets_for(
+            sender_id,
+            normalized_mentions,
+            self._group_online_agents(),
+            hop_count=0,
+        )
+
+        try:
+            rec = self.state.group_chat.append(
+                sender_id,
+                text,
+                source="ios-app",
+                mentions=normalized_mentions,
+                reply_to=reply_to,
+                parent_msg_id=reply_to,
+                delivery={"targets": targets, "delivered": [], "failed": []},
+                attachment_url=attachment_url,
+                attachment_filename=filename,
+                attachment_type=atype,
+            )
+        except ValueError as e:
+            self._send_json(400, {"error": str(e)})
+            return
 
         self._send_json(200, {"ok": True, "record": rec})
 
