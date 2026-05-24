@@ -543,7 +543,10 @@ struct CcSettingsView: View {
         .background(Color.ccBg)
         .task { await vm.refreshAll() }
         .refreshable { await vm.refreshAll() }
-        .onChange(of: aiName) { _, _ in CcNameResolver.notifyChanged() }
+        .onChange(of: aiName) { _, newName in
+            CcNameResolver.notifyChanged()
+            Task { await PushTokenManager.shared.updateAIName(newName) }
+        }
         .onChange(of: userName) { _, _ in CcNameResolver.notifyChanged() }
         .onChange(of: groupName) { _, _ in
             NotificationCenter.default.post(name: .ccGroupAppearanceDidChange, object: nil)

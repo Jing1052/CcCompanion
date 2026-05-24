@@ -28,6 +28,8 @@ final class PushTokenManager {
         return URLSession(configuration: cfg)
     }()
 
+    private var lastTokenHex: String?
+
     func requestAuthorization() {
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { granted, _ in
             guard granted else { return }
@@ -39,7 +41,19 @@ final class PushTokenManager {
 
     func registerDeviceToken(_ tokenData: Data) async {
         let hex = tokenData.map { String(format: "%02x", $0) }.joined()
-        logger.info("registering device token len=\(hex.count)")
+        lastTokenHex = hex
+        let aiName = UserDefaults.standard.string(forKey: "ai_name") ?? CcDefaultAIName
+        await _post(token: hex, aiName: aiName)
+    }
+
+    /// Call when the user changes ai_name in Settings to keep backend in sync.
+    func updateAIName(_ newName: String) async {
+        guard let hex = lastTokenHex else { return }
+        await _post(token: hex, aiName: newName)
+    }
+
+    private func _post(token: String, aiName: String) async {
+        logger.info("registering device token len=\(token.count) ai_name=\(aiName, privacy: .public)")
         let url = serverURL.appendingPathComponent("register-device-token")
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
@@ -47,7 +61,7 @@ final class PushTokenManager {
         if let secret = sharedSecret, !secret.isEmpty {
             req.setValue(secret, forHTTPHeaderField: "X-Auth-Token")
         }
-        guard let body = try? JSONSerialization.data(withJSONObject: ["token": hex]) else { return }
+        guard let body = try? JSONSerialization.data(withJSONObject: ["token": token, "ai_name": aiName]) else { return }
         req.httpBody = body
         do {
             let (_, resp) = try await session.data(for: req)

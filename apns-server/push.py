@@ -1112,7 +1112,8 @@ class PushHandler(BaseHTTPRequestHandler):
         if not token:
             self._send_json(400, {"error": "token required"})
             return
-        is_new = self.state.device_tokens.register(token)
+        ai_name = str(body.get("ai_name") or "").strip()
+        is_new = self.state.device_tokens.register(token, ai_name)
         logger.info("device_token %s token=%s... total=%d",
                     "new" if is_new else "refresh", token[:8], len(self.state.device_tokens))
         self._send_json(200, {"ok": True, "new": is_new, "total": len(self.state.device_tokens)})
@@ -3572,7 +3573,7 @@ class PushHandler(BaseHTTPRequestHandler):
                             cs["taskStep"] = str(active_task["step"])[:80]
                     push_kwargs: dict[str, Any] = {"event": "update", "content_state": cs}
                     if role == "assistant" and push_text_snap:
-                        push_kwargs["alert_title"] = "Cc"
+                        push_kwargs["alert_title"] = self.state.device_tokens.default_ai_name()
                         push_kwargs["alert_body"] = push_text_snap[:120]
                     apns_t0 = time.time()
                     for tok in active_tokens_snapshot:
@@ -3588,7 +3589,7 @@ class PushHandler(BaseHTTPRequestHandler):
                 # standard remote notification banner (非灵动岛) — 跳过 [op] 前缀和非 assistant
                 if role == "assistant" and push_text_snap and not push_text_snap.startswith("[op]"):
                     notif_t0 = time.time()
-                    self._send_chat_notification("Cc", push_text_snap[:80])
+                    self._send_chat_notification(self.state.device_tokens.default_ai_name(), push_text_snap[:80])
                     notif_ms = int((time.time() - notif_t0) * 1000)
                     print(f"notification_ms={notif_ms}", file=sys.stderr, flush=True)
             except Exception as e:
