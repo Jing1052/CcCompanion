@@ -228,9 +228,13 @@ class GroupChatStore:
         # human user sends: no @mention → default to primary assistant; otherwise parse @
         # agent 发: 必须 explicit mention 才 fan-out + hop_count >= 3 停 (防无限 loop)
         if sender_id == "amian":
+            # Build 217 T3 / B-2 broadcast — human user with no @mention fans
+            # out to all reply-capable agents (replaces the old default-to-primary
+            # routing). Each receiving agent self-decides whether to respond
+            # (their SOP "群聊收到 broadcast 消息" section handles relevance).
             if not mentions:
-                mentions = ["opia"]
-            if ALL_TOKEN in mentions:
+                candidates = REPLY_AGENT_IDS
+            elif ALL_TOKEN in mentions:
                 candidates = REPLY_AGENT_IDS
             else:
                 candidates = [m for m in mentions if m in REPLY_AGENT_IDS]

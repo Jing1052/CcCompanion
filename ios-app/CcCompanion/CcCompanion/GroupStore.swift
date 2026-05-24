@@ -47,19 +47,23 @@ actor GroupNetworkClient {
     }
 
     /// Build 214 T1 — 工作群输入框 调 POST /group/send 把 amian 的文字消息塞到工作群.
-    /// mentions 数组是已解析的 agent id list (di / shu / opia 等).
+    /// mentions 数组是已解析的 agent id list. Build 217 Q1: 加 replyTo 支持引用 reply_to.
     @discardableResult
-    func sendMessage(senderId: String, text: String, mentions: [String]) async throws -> Bool {
+    func sendMessage(senderId: String, text: String, mentions: [String], replyTo: String? = nil) async throws -> Bool {
         let url = CcServerConfig.serverURL.appendingPathComponent("group/send")
         var request = CcServerConfig.authenticatedRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.timeoutInterval = 20
-        let payload: [String: Any] = [
+        var payload: [String: Any] = [
             "sender_id": senderId,
             "text": text,
             "mentions": mentions,
         ]
+        if let replyTo, !replyTo.isEmpty {
+            payload["reply_to"] = replyTo
+            payload["parent_msg_id"] = replyTo
+        }
         request.httpBody = try JSONSerialization.data(withJSONObject: payload)
         let (_, response) = try await session.data(for: request)
         try Self.validate(response: response)
@@ -161,9 +165,10 @@ final class GroupStore: ObservableObject {
     }
 
     /// Build 214 T1 — 发完立刻触发一次 pollNext 把自己消息拉回来 (无 optimistic, 简单可靠).
-    func sendUserMessage(text: String, mentions: [String]) async -> Bool {
+    /// Build 217 Q1 — 加 replyTo 支持引用回复.
+    func sendUserMessage(text: String, mentions: [String], replyTo: String? = nil) async -> Bool {
         do {
-            _ = try await client.sendMessage(senderId: "amian", text: text, mentions: mentions)
+            _ = try await client.sendMessage(senderId: "amian", text: text, mentions: mentions, replyTo: replyTo)
             await fetchMessages(reset: false)
             return true
         } catch {

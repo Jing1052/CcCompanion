@@ -143,6 +143,10 @@ struct ContentView: View {
                 // Build 215 P4 — 进 chat tab 视为已读, 清 badge
                 chatBadgeStore.markAllRead()
             }
+            // Build 217 T4 — 进群聊 tab 同样清 unread + mention 红 @
+            if newTab == 3 {
+                groupStore.markAllRead()
+            }
         }
         .onChange(of: featureGroupView) { _, enabled in
             if !enabled && selectedTab == 3 {

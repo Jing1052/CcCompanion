@@ -13,6 +13,8 @@ struct GroupChatView: View {
     @AppStorage("chat_font_size_level") private var chatFontLevel: String = "medium"
     // Build 215 S1 — 群聊自定义背景, 跟 chat_background_path 独立 key
     @AppStorage("group_chat_background_path") private var groupBackgroundPath: String = ""
+    // Build 217 S1 — 群聊整体头像 (SettingsView GroupSettingsEditSheet 编辑后落地, 这里读出)
+    @AppStorage("group_avatar_path") private var groupAvatarPath: String = ""
     @State private var searchVisible = false
     @State private var searchText = ""
     // Build 215 P3 — 搜索 filter chip (跟 ChatView 搜索 chip 对齐 + 日期)
@@ -26,6 +28,8 @@ struct GroupChatView: View {
     @State private var showAgentPicker: Bool = false
     @State private var sending: Bool = false
     @State private var inputToast: String = ""
+    // Build 217 Q1 — 引用 quoting state (跟 ChatView vm.quoting 同款), 发送时带 reply_to, 不立刻发让用户加文本
+    @State private var quoting: GroupMessage? = nil
 
     private var chatBodySize: CGFloat {
         chatFontLevel == "small" ? 15 : chatFontLevel == "large" ? 18 : 17
@@ -108,11 +112,13 @@ struct GroupChatView: View {
                         } else {
                             ForEach(visibleMessages) { message in
                                 let member = store.member(for: message.senderId)
+                                let parent = parentLookup(for: message)
                                 GroupMessageRow(
                                     message: message,
                                     member: member,
                                     bodySize: chatBodySize,
                                     isFavorite: favoriteMessageIds.contains(message.id),
+                                    parentPreview: parent.map { ($0.text, store.member(for: $0.senderId).displayName) },
                                     onToggleFavorite: {
                                         toggleFavorite(message: message, member: member)
                                     },
@@ -135,6 +141,16 @@ struct GroupChatView: View {
                 .background(groupBackgroundPath.isEmpty ? Color.ccBg : Color.clear)
                 .refreshable { await store.refreshNow() }
                 .scrollDismissesKeyboard(.immediately)
+                // Build 217 T8 — 点聊天区域 (空白处) 收起键盘. 不抢 LazyVStack 内 row 的 contextMenu hit-test.
+                .simultaneousGesture(TapGesture().onEnded { inputFocused = false })
+                // Build 217 T7 — onAppear 立刻 scroll 到最底端 (跟 ChatView 同款进 tab 进底)
+                .onAppear {
+                    if let id = store.messages.last?.id {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                            proxy.scrollTo(id, anchor: .bottom)
+                        }
+                    }
+                }
                 .onChange(of: store.messages.last?.id) { _, id in
                     guard let id else { return }
                     withAnimation(.easeOut(duration: 0.22)) {
@@ -165,6 +181,36 @@ struct GroupChatView: View {
                     .padding(.horizontal, 14)
                     .padding(.vertical, 4)
                     .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            // Build 217 Q1 — quote preview 条 (跟 ChatView QuotePreviewBar 同款 在 input bar 上方)
+            if let q = quoting {
+                HStack(spacing: 8) {
+                    Image(systemName: "quote.bubble.fill")
+                        .font(.ccSerifAdaptive(size: 12))
+                        .foregroundStyle(Color.ccAccent)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("引用 \(store.member(for: q.senderId).displayName)")
+                            .font(.ccSerifAdaptive(size: 11, weight: .semibold))
+                            .foregroundStyle(Color.ccAccent)
+                        Text(q.text)
+                            .font(.ccSerifAdaptive(size: 12))
+                            .foregroundStyle(Color.ccTextDim)
+                            .lineLimit(2)
+                    }
+                    Spacer()
+                    Button {
+                        quoting = nil
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.ccSerifAdaptive(size: 16))
+                            .foregroundStyle(Color.ccTextDim)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(Color.ccCard.opacity(0.55))
             }
 
             GroupInputBar(
@@ -208,10 +254,25 @@ struct GroupChatView: View {
             NavigationStack { GroupFavoritesView() }
         }
         .sheet(isPresented: $showAgentPicker) {
-            AgentMentionPicker(members: store.agentMembers) { member in
-                insertMention(member: member)
-                showAgentPicker = false
-            }
+            AgentMentionPicker(
+                members: store.agentMembers,
+                onPick: { member in
+                    insertMention(member: member)
+                    showAgentPicker = false
+                },
+                onPickAll: {
+                    // Build 217 T2 — 艾特所有人, draft 插 `@all `, backend 解 mentions=["all"] 走全 agent fan-out
+                    if draftText.isEmpty {
+                        draftText = "@all "
+                    } else if draftText.hasSuffix(" ") || draftText.hasSuffix("\n") {
+                        draftText += "@all "
+                    } else {
+                        draftText += " @all "
+                    }
+                    showAgentPicker = false
+                    inputFocused = true
+                }
+            )
         }
         .onAppear {
             favoriteMessageIds = GroupFavoritesStore.ids()
@@ -228,11 +289,22 @@ struct GroupChatView: View {
     @ViewBuilder
     private var customHeader: some View {
         HStack(spacing: 12) {
-            Image(systemName: "person.3.sequence.fill")
-                .font(.system(size: 22, weight: .semibold))
-                .foregroundStyle(Color.ccAccent)
-                .frame(width: 38, height: 38)
-                .background(Circle().fill(Color.ccCard.opacity(0.6)))
+            // Build 217 S1 — 优先读 group_avatar_path AppStorage 设置过的群头像; 空 fallback SF symbol
+            ZStack {
+                if !groupAvatarPath.isEmpty,
+                   let img = AvatarDiskStore.load(storedValue: groupAvatarPath) {
+                    Image(uiImage: img)
+                        .resizable()
+                        .scaledToFill()
+                } else {
+                    Circle().fill(Color.ccCard.opacity(0.6))
+                    Image(systemName: "person.3.sequence.fill")
+                        .font(.system(size: 22, weight: .semibold))
+                        .foregroundStyle(Color.ccAccent)
+                }
+            }
+            .frame(width: 38, height: 38)
+            .clipShape(Circle())
             Text(headerTitle)
                 .font(.ccSerifAdaptive(size: 17, weight: .semibold))
                 .foregroundStyle(Color.ccAccent)
@@ -290,11 +362,10 @@ struct GroupChatView: View {
         CcToastBus.shared.show(isNowFavorite ? "已收藏群聊消息" : "已取消收藏")
     }
 
-    // Build 215 T4 — 引用回复. 没有 reply_to 后端支持时, 直接在 draft 头部插一段 "> @sender: ..." 引文.
+    // Build 217 Q1 — 引用回复. 设 quoting state 弹 QuotePreviewBar, 不立刻发, 让用户加文本.
+    // commitSend 把 quoting.id 当 reply_to 传给 backend, send 完清 quoting.
     private func quoteMessage(_ message: GroupMessage, member: GroupMember) {
-        let snippet = message.text.prefix(80).replacingOccurrences(of: "\n", with: " ")
-        let prefix = "> @\(member.displayName): \(snippet)\n"
-        draftText = prefix + draftText
+        quoting = message
         inputFocused = true
     }
 
@@ -314,19 +385,28 @@ struct GroupChatView: View {
         let text = draftText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !sending else { return }
         let mentions = resolveMentions(in: text)
+        let replyTo = quoting?.id
         sending = true
         inputToast = ""
         Task {
-            let ok = await store.sendUserMessage(text: text, mentions: mentions)
+            let ok = await store.sendUserMessage(text: text, mentions: mentions, replyTo: replyTo)
             await MainActor.run {
                 sending = false
                 if ok {
                     draftText = ""
+                    quoting = nil
                 } else {
                     inputToast = store.lastError ?? "发送失败"
                 }
             }
         }
+    }
+
+    /// Build 217 Q1 — render reply_to 用. parent message 若在当前 messages 列表里查得到返回, 否则 nil.
+    private func parentLookup(for message: GroupMessage) -> GroupMessage? {
+        let parentId = message.replyTo ?? message.parentMsgId
+        guard let parentId, !parentId.isEmpty else { return nil }
+        return store.messages.first { $0.id == parentId }
     }
 
     private func resolveMentions(in text: String) -> [String] {
@@ -412,6 +492,8 @@ private struct GroupMessageRow: View {
     let member: GroupMember
     let bodySize: CGFloat
     let isFavorite: Bool
+    // Build 217 Q1 — parent message preview (text + sender displayName) 用来 render 引用回复 badge
+    let parentPreview: (text: String, senderName: String)?
     let onToggleFavorite: () -> Void
     let onQuote: () -> Void
     let onDelete: () -> Void
@@ -443,23 +525,43 @@ private struct GroupMessageRow: View {
                     if !message.isHumanSender { messageTypeBadge }
                 }
 
-                highlightedText(message.text)
-                    .font(.ccSerifAdaptive(size: bodySize))
-                    .foregroundStyle(Color.ccText)
-                    .lineSpacing(3)
-                    .lineLimit(nil)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .fill(bubbleColor)
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .stroke(Color.ccTextDim.opacity(0.08), lineWidth: 0.5)
-                    )
-                    .frame(maxWidth: 330, alignment: message.isHumanSender ? .trailing : .leading)
+                VStack(alignment: message.isHumanSender ? .trailing : .leading, spacing: 4) {
+                    // Build 217 Q1 — 引用 parent message 时 render 一个小 quote 头条
+                    if let parent = parentPreview {
+                        HStack(spacing: 4) {
+                            Image(systemName: "arrow.turn.up.left")
+                                .font(.system(size: 9, weight: .semibold))
+                                .foregroundStyle(Color.ccAccent)
+                            Text("回复 \(parent.senderName): \(parent.text)")
+                                .font(.ccSerifAdaptive(size: 11))
+                                .foregroundStyle(Color.ccTextDim)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.ccCard.opacity(0.5))
+                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    }
+
+                    highlightedText(message.text)
+                        .font(.ccSerifAdaptive(size: bodySize))
+                        .foregroundStyle(Color.ccText)
+                        .lineSpacing(3)
+                        .lineLimit(nil)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(
+                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .fill(bubbleColor)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .stroke(Color.ccTextDim.opacity(0.08), lineWidth: 0.5)
+                        )
+                }
+                .frame(maxWidth: 330, alignment: message.isHumanSender ? .trailing : .leading)
             }
 
             if message.isHumanSender {
@@ -508,12 +610,13 @@ private struct GroupMessageRow: View {
         }
     }
 
+    // Build 217 T6 — bubble 用 solid color 不再带 opacity, 跟 ChatView 视觉一致 (不让背景图透过 bubble 看不清字)
     private var bubbleColor: Color {
-        if message.isHumanSender { return Color.ccAccent.opacity(0.16) }
-        if message.isBlock { return Color.red.opacity(0.12) }
-        if message.isTask { return Color.blue.opacity(0.11) }
-        if message.isShip { return Color.green.opacity(0.12) }
-        return Color.ccCard.opacity(0.82)
+        if message.isHumanSender { return Color.ccAccent.opacity(0.22) }
+        if message.isBlock { return Color.red.opacity(0.16) }
+        if message.isTask { return Color.blue.opacity(0.14) }
+        if message.isShip { return Color.green.opacity(0.16) }
+        return Color.ccCard
     }
 
     private var messageTypeColor: Color {
@@ -679,11 +782,41 @@ private struct GroupInputBar: View {
 private struct AgentMentionPicker: View {
     let members: [GroupMember]
     let onPick: (GroupMember) -> Void
+    let onPickAll: () -> Void
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         NavigationStack {
             List {
+                // Build 217 T2 — 第一行固定 "艾特所有人" 选项, 选中 → @all
+                Button {
+                    onPickAll()
+                } label: {
+                    HStack(spacing: 12) {
+                        ZStack {
+                            Circle().fill(Color.ccAccent.opacity(0.18))
+                            Image(systemName: "person.3.fill")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(Color.ccAccent)
+                        }
+                        .frame(width: 32, height: 32)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("艾特所有人")
+                                .font(.ccSerifAdaptive(size: 15, weight: .semibold))
+                                .foregroundStyle(Color.ccText)
+                            Text("@all 群里全员 fan-out")
+                                .font(.ccSerifAdaptive(size: 11))
+                                .foregroundStyle(Color.ccTextDim)
+                        }
+                        Spacer()
+                        Text("@all")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(Color.ccAccent)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+
                 ForEach(members) { member in
                     Button {
                         onPick(member)
