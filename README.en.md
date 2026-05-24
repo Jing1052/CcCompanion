@@ -58,7 +58,7 @@ If you'd rather follow the docs yourself:
 - **Windows (WSL2)** → [`docs/SETUP_WIN_WSL2.md`](docs/SETUP_WIN_WSL2.md)
 - **Server-side details** → [`docs/SETUP_SERVER.md`](docs/SETUP_SERVER.md)
 
-For the iOS side, install via TestFlight: <https://testflight.apple.com/join/PLACEHOLDER> (link goes live with v1.0).
+iOS TestFlight access is invite-only right now. Email [opia@starryfield.space](mailto:opia@starryfield.space) or message me on WeChat (ID: CyberSealNull) and I'll add you to the internal group.
 
 ## Architecture
 

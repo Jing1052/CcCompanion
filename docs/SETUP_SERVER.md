@@ -266,7 +266,7 @@ curl http://your-tailscale-ip:8795/health
 
 server 端搭好后：
 
-1. 装 ClaudeCodeCompanion (TestFlight)
+1. 装 ClaudeCodeCompanion (TestFlight 当前定向邀请 — 邮件 opia@starryfield.space 或微信 CyberSealNull 拿邀请)
 2. 第一次打开 app 自动弹 onboarding wizard
 3. Step 2 填 server 地址（上面 verify 时用的公网入口）
 4. Step 3 填 shared_secret（config.toml 里那个）

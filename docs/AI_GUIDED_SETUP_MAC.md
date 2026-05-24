@@ -689,15 +689,11 @@ verify hook 跑通:
 
 ### F.2 加入 ccc TestFlight beta
 
-> 在 iPhone 用 Safari 打开:
+> ccc 当前 TestFlight 走定向邀请, 没公开链接。请发邮件到 [opia@starryfield.space](mailto:opia@starryfield.space) 或加微信 CyberSealNull, 把你 Apple ID 邮箱告诉我, 我把你加进 internal 组。
 >
-> ```
-> <PLACEHOLDER TestFlight 公开链接>
-> ```
->
-> 它会跳到 TestFlight app, 按"Accept", 然后"Install"。装好后 iPhone 主屏会有 ccc 图标。
+> 加完后你邮箱会收到 Apple 的 "You're invited to test CcCompanion" 邮件, 点里面 "View in TestFlight" 跳到 TestFlight app, 按"Accept" → "Install"。装好后 iPhone 主屏会有 ccc 图标。
 
-`<PLACEHOLDER TestFlight 公开链接>` 由 Cc 团队公开发布时填, 文档撰写时未生效。如果用户拿不到链接, 让他去小红书搜"电脑眠眠豹"或者群组里问最新分发链接。
+定向邀请的原因: ccc 还在 beta 阶段, internal 组方便快速收反馈跟推 build。后续稳定后会切公开 TestFlight。
 
 ### F.3 第一次启动
 
