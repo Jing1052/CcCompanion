@@ -828,7 +828,12 @@ struct CcSettingsView: View {
                 // Build 220 item 1 — Edit sheet 红删除按钮调这里, 跟 contextMenu 删除路径同款
                 GroupMemberRemovalsStore.markRemoved(member.id)
                 GroupMemberAdditionsStore.remove(id: member.id)
-                Task { await GroupMemberSyncClient.delete(id: member.id) }
+                let title = member.title
+                let mid = member.id
+                Task {
+                    let r = await GroupMemberSyncClient.delete(id: mid)
+                    if !r.ok { await MainActor.run { actionToast = "本地已删 \(title), 但 \(r.detail)" } }
+                }
                 memberEditTarget = nil
                 actionToast = "已从群里删除 \(member.title)"
             }
@@ -856,8 +861,14 @@ struct CcSettingsView: View {
                 // 防止某些情况 @AppStorage observation 还没 fire 就 sheet dismiss. dismiss 也延后一拍.
                 GroupMemberAdditionsStore.add(newMember)
                 GroupMemberAdditionsStore.bumpRevisionPublic()
-                Task { await GroupMemberSyncClient.add(newMember) }
                 actionToast = "已添加 \(newMember.displayName)"
+                // Build 221 task1 — 后端持久化失败不再 silent: surface toast
+                Task {
+                    let r = await GroupMemberSyncClient.add(newMember)
+                    if !r.ok {
+                        await MainActor.run { actionToast = "本地已加 \(newMember.displayName), 但 \(r.detail)" }
+                    }
+                }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                     memberAddSheetPresented = false
                 }
@@ -874,7 +885,12 @@ struct CcSettingsView: View {
                 if let m = memberDeleteConfirm {
                     GroupMemberRemovalsStore.markRemoved(m.id)
                     GroupMemberAdditionsStore.remove(id: m.id)
-                    Task { await GroupMemberSyncClient.delete(id: m.id) }
+                    let title = m.title
+                    let mid = m.id
+                    Task {
+                        let r = await GroupMemberSyncClient.delete(id: mid)
+                        if !r.ok { await MainActor.run { actionToast = "本地已删 \(title), 但 \(r.detail)" } }
+                    }
                     actionToast = "已从群里删除 \(m.title)"
                 }
                 memberDeleteConfirm = nil
@@ -1966,9 +1982,18 @@ private extension String {
     var nilIfEmpty: String? { isEmpty ? nil : self }
 }
 
-// MARK: - Build 218 S4 — backend sync client (best-effort, AppStorage 是 source of truth)
+// MARK: - Build 218 S4 / 221 task1 — backend sync client.
+// AppStorage 仍是本地 SoT, 但后端持久化结果不再 silent 吞掉:
+// 返回 (ok, message), callsite 在后端失败时 surface toast 让用户知道"本地加了但后端没持久化".
+// Build 221 root cause: 之前 `_ = try? await ...` 把 404 / 网络错全吞了, 生产服没 add_member
+// endpoint 时用户完全无信号 (silent fail). 现在 check HTTP status + 解析 ok 字段.
 enum GroupMemberSyncClient {
-    static func add(_ member: GroupMember) async {
+    struct SyncResult {
+        let ok: Bool
+        let detail: String
+    }
+
+    static func add(_ member: GroupMember) async -> SyncResult {
         let url = CcServerConfig.serverURL.appendingPathComponent("group/members/add")
         var req = CcServerConfig.authenticatedRequest(url: url)
         req.httpMethod = "POST"
@@ -1983,15 +2008,36 @@ enum GroupMemberSyncClient {
             "can_reply": member.canReply ?? true,
         ]
         req.httpBody = try? JSONSerialization.data(withJSONObject: payload)
-        _ = try? await URLSession.shared.data(for: req)
+        return await postExpectingOK(req, action: "添加")
     }
 
-    static func delete(id: String) async {
+    static func delete(id: String) async -> SyncResult {
         let url = CcServerConfig.serverURL.appendingPathComponent("group/members/delete")
         var req = CcServerConfig.authenticatedRequest(url: url)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.httpBody = try? JSONSerialization.data(withJSONObject: ["id": id])
-        _ = try? await URLSession.shared.data(for: req)
+        return await postExpectingOK(req, action: "删除")
+    }
+
+    private static func postExpectingOK(_ req: URLRequest, action: String) async -> SyncResult {
+        do {
+            let (data, response) = try await URLSession.shared.data(for: req)
+            let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+            if code == 404 {
+                return SyncResult(ok: false, detail: "后端无 \(action)成员接口 (服务端待升级)")
+            }
+            guard (200...299).contains(code) else {
+                return SyncResult(ok: false, detail: "后端\(action)失败 (HTTP \(code))")
+            }
+            // 解 {"ok": true/false}
+            if let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let ok = obj["ok"] as? Bool {
+                return SyncResult(ok: ok, detail: ok ? "" : "后端\(action)返回 ok=false")
+            }
+            return SyncResult(ok: true, detail: "")
+        } catch {
+            return SyncResult(ok: false, detail: "后端\(action)网络错: \(error.localizedDescription)")
+        }
     }
 }
