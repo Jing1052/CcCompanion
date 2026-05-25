@@ -191,6 +191,8 @@ final class GroupStore: ObservableObject {
     // Build 215 T1 — 客户端 unread / mention 计数. 视图 onAppear markAllRead() 清零, polling 拉到新消息 → 自增.
     @Published var unreadCount: Int = 0
     @Published var mentionCount: Int = 0
+    // r5: ContentView set true 当群聊 tab 在屏 + app 在前台. active 时新消息直接算"读过" 不增 badge, 同步推 lastSeenTs.
+    @Published var isGroupTabActive: Bool = false
     // Build 220 item 13 — 在线人数 (每 5s 拉 /group/roster/online).
     @Published var onlineCount: Int = 0
     @Published var onlineIds: [String] = []
@@ -365,8 +367,12 @@ final class GroupStore: ObservableObject {
     }
 
     func mentionMember(for token: String) -> GroupMember? {
+        // r4-3: 找全 roster (includes user/human members so they can be mentioned), 不只 agent
         let normalized = token.lowercased()
-        return agentMembers.first { member in
+        let all = GroupMember.activeRoster
+            .filter { !GroupMemberRemovalsStore.isRemoved($0.id) }
+            .map { member(for: $0.id) }
+        return all.first { member in
             member.id == token
                 || member.id.lowercased() == normalized
                 || member.displayName == token
@@ -431,20 +437,37 @@ final class GroupStore: ObservableObject {
         }
         // Build 215 T1 — 新进来的消息按 lastSeenTs 算 unread + mention.
         // 自己发的不算 / amian 的不算 (isHumanSender).
+        // r5: tab 在屏 + 前台时 active=true 新消息直接算读过 不增 badge 同步 push lastSeenTs.
         let seen = lastSeenTs
         for r in records where !r.isHumanSender {
             if seen.isEmpty || r.ts > seen {
+                if isGroupTabActive {
+                    // 在屏 直接算读 同步推 lastSeenTs (但不在循环里写 UserDefaults — 循环外一次)
+                    continue
+                }
                 unreadCount += 1
                 if isMentioningHuman(r) {
                     mentionCount += 1
                 }
             }
         }
+        if isGroupTabActive, let latest = records.last?.ts, !latest.isEmpty {
+            lastSeenTs = latest
+        }
     }
 
     /// Build 215 P1 — cold start / reset 路径用. 全量扫 messages 跟 lastSeenTs 比, 重算 unread/mention 计数.
     /// 调用前提: messages 已经赋值. 不依赖之前 stored unreadCount (会被覆盖).
     private func recomputeUnreadFromMessages() {
+        // r5: tab 在屏 + 前台时 active=true 直接 0 + push lastSeenTs.
+        if isGroupTabActive {
+            unreadCount = 0
+            mentionCount = 0
+            if let latest = messages.last?.ts, !latest.isEmpty {
+                lastSeenTs = latest
+            }
+            return
+        }
         let seen = lastSeenTs
         var unread = 0
         var mention = 0

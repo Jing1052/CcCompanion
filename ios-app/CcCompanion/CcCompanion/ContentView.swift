@@ -131,6 +131,8 @@ struct ContentView: View {
             chatBadgeStore.start()
             // Build 218 B1 — 启动时根据当前 tab 同步 isChatTabActive (cold start tab 0 默认)
             chatBadgeStore.isChatTabActive = (selectedTab == 0)
+            // r5: 同款 cold start 群聊 tab active flag
+            groupStore.isGroupTabActive = (selectedTab == 3)
         }
         .onChange(of: featureGroupView) { _, enabled in
             if enabled {
@@ -148,6 +150,8 @@ struct ContentView: View {
                 chatBadgeStore.markAllRead()
             }
             // Build 217 T4 — 进群聊 tab 同样清 unread + mention 红 @
+            // r5: 同 ChatBadgeStore pattern push isGroupTabActive 让 fetch 在屏时不增 badge
+            groupStore.isGroupTabActive = (newTab == 3)
             if newTab == 3 {
                 groupStore.markAllRead()
             }
@@ -160,6 +164,8 @@ struct ContentView: View {
         .onChange(of: scenePhase) { _, newPhase in
             // Build 218 B1 — 后台时 isChatTabActive = false (即使 selectedTab==0), 防止后台 polling 误清 unread
             chatBadgeStore.isChatTabActive = (newPhase == .active && selectedTab == 0)
+            // r5: 同款给群聊 tab
+            groupStore.isGroupTabActive = (newPhase == .active && selectedTab == 3)
             if newPhase == .active && selectedTab == 0 {
                 chatScrollToken &+= 1
                 chatBadgeStore.markAllRead()
