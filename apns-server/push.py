@@ -1195,14 +1195,17 @@ class PushHandler(BaseHTTPRequestHandler):
         except ValueError as e:
             self._send_json(400, {"error": str(e)})
             return
-        push_result = self._send_thinking_pending(record["turn_id"])
+        # P2 (A1 cutover): record 已落盘. silent push 改异步发, 不阻塞 response —
+        # 之前同步发 push 会 hang 住 POST response 让 caller (stream runner) timeout。
+        tid = record["turn_id"]
+        threading.Thread(target=lambda: self._send_thinking_pending(tid), daemon=True).start()
         self._send_json(
             200,
             {
                 "ok": True,
                 "record": record,
                 "thinking_pending": True,
-                "push": push_result,
+                "push": {"attempted": True, "async": True},
             },
         )
 
