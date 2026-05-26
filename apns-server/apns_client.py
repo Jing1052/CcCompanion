@@ -209,3 +209,36 @@ class APNsClient:
             body=resp.text,
             request_payload=payload,
         )
+
+    def push_background_notification(
+        self,
+        push_token: str,
+        payload: dict[str, Any],
+    ) -> APNsResponse:
+        """Send a standard silent remote notification."""
+        payload = dict(payload)
+        aps = dict(payload.get("aps") or {})
+        aps.setdefault("content-available", 1)
+        payload["aps"] = aps
+
+        body = json.dumps(payload, separators=(",", ":"))
+        url = f"{self.base_url}/3/device/{push_token}"
+        headers = {
+            "authorization": f"bearer {self.jwt.get_token()}",
+            "apns-topic": self.bundle_id,
+            "apns-push-type": "background",
+            "apns-priority": "5",
+            "apns-expiration": "0",
+            "content-type": "application/json",
+        }
+        try:
+            resp = self._client.post(url, content=body, headers=headers)
+        except httpx.HTTPError as e:
+            logger.error("APNs background push HTTP error: %s", e)
+            return APNsResponse(status=599, apns_id=None, body=str(e), request_payload=payload)
+        return APNsResponse(
+            status=resp.status_code,
+            apns_id=resp.headers.get("apns-id"),
+            body=resp.text,
+            request_payload=payload,
+        )

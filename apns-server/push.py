@@ -64,6 +64,7 @@ from timeline import Timeline
 from tts import TTS
 from settings import Settings
 from usage import UsageReader
+from thinking_store import ThinkingStore
 import todos as todos_mod
 from studyroom import StudyroomDB
 import subprocess
@@ -341,6 +342,10 @@ class ServerState:
         # chat history 持久化跟 token 同目录
         chat_history_path = Path(self.token_store_path).parent / "chat_history.jsonl"
         self.chat = ChatHistory(chat_history_path)
+        thinking_log_path = Path(
+            server_cfg.get("thinking_log_path") or (HERE / "state" / "thinking_log.jsonl")
+        )
+        self.thinking = ThinkingStore(thinking_log_path)
         group_chat_path = Path(self.token_store_path).parent / "group_chat.jsonl"
         group_state_path = Path(self.token_store_path).parent / "group_state.json"
         self.group_chat = GroupChatStore(group_chat_path, group_state_path)
@@ -569,6 +574,9 @@ class PushHandler(BaseHTTPRequestHandler):
             return
         if self.path.startswith("/chat/history"):
             self._handle_chat_history()
+            return
+        if self.path.startswith("/v1/thinking"):
+            self._handle_thinking_get()
             return
         if self.path == "/pet/state":
             self._handle_pet_state_get()
@@ -922,6 +930,9 @@ class PushHandler(BaseHTTPRequestHandler):
         elif self.path == "/register-device-token":
             self._handle_register_device_token(body)
             return
+        elif self.path == "/v1/thinking":
+            self._handle_thinking_post(body)
+            return
         elif self.path == "/reminder/schedule":
             self._handle_reminder_schedule(body)
             return
@@ -1158,6 +1169,100 @@ class PushHandler(BaseHTTPRequestHandler):
                                    resp.status, token[:8], resp.reason)
             except Exception as e:
                 logger.warning("device push exception token=%s...: %s", token[:8], e)
+
+    def _handle_thinking_post(self, body: dict[str, Any]):
+        try:
+            record = self.state.thinking.append(
+                turn_id=body.get("turn_id", ""),
+                thinking=body.get("thinking", ""),
+                timestamp=body.get("timestamp"),
+                session_id=body.get("session_id"),
+            )
+        except ValueError as e:
+            self._send_json(400, {"error": str(e)})
+            return
+        push_result = self._send_thinking_pending(record["turn_id"])
+        self._send_json(
+            200,
+            {
+                "ok": True,
+                "record": record,
+                "thinking_pending": True,
+                "push": push_result,
+            },
+        )
+
+    def _handle_thinking_get(self):
+        from urllib.parse import parse_qs, urlparse
+
+        query = parse_qs(urlparse(self.path).query)
+        turn_id = query.get("turn_id", [""])[0]
+        try:
+            limit = int(query.get("limit", ["50"])[0])
+        except (TypeError, ValueError):
+            limit = 50
+        records = self.state.thinking.read(turn_id=turn_id, limit=limit)
+        self._send_json(200, {"ok": True, "records": records, "count": len(records)})
+
+    def _send_thinking_pending(self, turn_id: str) -> dict[str, Any]:
+        if not self.state.apns_enabled or not self.state.notification_client:
+            return {"attempted": False, "reason": "apns disabled"}
+        device_tokens = self.state.device_tokens.all_tokens()
+        if not device_tokens:
+            return {"attempted": False, "reason": "no device tokens"}
+
+        payload = {
+            "aps": {"content-available": 1},
+            "thinking_pending": True,
+            "turn_id": turn_id,
+        }
+        results = []
+        for token in device_tokens:
+            try:
+                resp = self.state.notification_client.push_background_notification(
+                    push_token=token,
+                    payload=payload,
+                )
+                if resp.status == 410 or (
+                    resp.status == 400 and "BadDeviceToken" in (resp.reason or "")
+                ):
+                    logger.info(
+                        "device_token invalid (status=%d), removing token=%s...",
+                        resp.status,
+                        token[:8],
+                    )
+                    self.state.device_tokens.remove(token)
+                elif not resp.ok:
+                    logger.warning(
+                        "background push failed status=%d token=%s... reason=%s",
+                        resp.status,
+                        token[:8],
+                        resp.reason,
+                    )
+                results.append(
+                    {
+                        "token_prefix": token[:8] + "...",
+                        "status": resp.status,
+                        "ok": resp.ok,
+                        "reason": resp.reason,
+                    }
+                )
+            except Exception as e:
+                logger.warning("background push exception token=%s...: %s", token[:8], e)
+                results.append(
+                    {
+                        "token_prefix": token[:8] + "...",
+                        "status": 599,
+                        "ok": False,
+                        "reason": str(e),
+                    }
+                )
+        return {
+            "attempted": True,
+            "sent": sum(1 for item in results if item["ok"]),
+            "total": len(results),
+            "results": results,
+        }
 
     # ------------------------------------------------------------------
     # /diary/* — chain↔用户 chat-style journaling stream (OTS Diary tab)
