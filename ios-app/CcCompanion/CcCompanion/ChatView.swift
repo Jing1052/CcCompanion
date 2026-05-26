@@ -640,8 +640,21 @@ final class ChatViewModel: ObservableObject {
     @Published private(set) var displayedRowsCache: [ChatRowItem] = []
     // Phase 3 (thinking-stream-render): turn_id → 拉到的 thinking 文本. ThinkingChip 读这里.
     @Published private(set) var thinkingByTurn: [String: String] = [:]
-    // 已发起 fetch 的 turn_id (成功/失败都记, 避免重复打 server).
+    // 已"终态"的 turn_id (拿到非空文本, 或退避重试耗尽 give up) — 不再拉.
     private var thinkingFetchedTurns: Set<String> = []
+    // 正在重试循环中的 turn_id, 防 push + poll 双触发起重复循环.
+    private var thinkingInFlightTurns: Set<String> = []
+    // Phase 3 (build 223): silent push 带 turn_id 到达 → 直接拉 thinking, 不等下一次 chat poll.
+    private var thinkingPushObserver: NSObjectProtocol?
+
+    init() {
+        thinkingPushObserver = NotificationCenter.default.addObserver(
+            forName: .ccThinkingPending, object: nil, queue: .main
+        ) { [weak self] note in
+            guard let tid = note.userInfo?["turn_id"] as? String, !tid.isEmpty else { return }
+            Task { @MainActor in self?.fetchThinkingForTurn(tid) }
+        }
+    }
     @Published private(set) var visibleLimit: Int = 300 { didSet { rebuildDisplayedRowsCache() } }
 
     var connectionStatus: ChatConnectionStatus {
@@ -1036,20 +1049,41 @@ final class ChatViewModel: ObservableObject {
     }
 
     // Phase 3 (thinking-stream-render): 新到的 assistant 记录带 turn_id 的, 异步拉 thinking.
-    // silent push (content-available) 到达后 poll 也走这条, 所以 push / 普通 poll 都覆盖.
+    // silent push (content-available) 到达后也走 fetchThinkingForTurn, 所以 push / 普通 poll 都覆盖.
     func fetchThinkingForNewTurns(_ records: [ChatMessage]) {
         let turnIds = records.compactMap { rec -> String? in
-            guard rec.role == "assistant", let tid = rec.turnId, !tid.isEmpty,
-                  !thinkingFetchedTurns.contains(tid) else { return nil }
+            guard rec.role == "assistant", let tid = rec.turnId, !tid.isEmpty else { return nil }
             return tid
         }
-        guard !turnIds.isEmpty else { return }
-        for tid in Set(turnIds) {
-            thinkingFetchedTurns.insert(tid)
-            Task { [weak self] in
-                guard let text = await ChatNetworkClient.shared.fetchThinking(turnId: tid) else { return }
-                await MainActor.run {
-                    self?.thinkingByTurn[tid] = text
+        for tid in Set(turnIds) { fetchThinkingForTurn(tid) }
+    }
+
+    // 单 turn 拉 thinking, 带短退避重试. silent push handler 也调这条 (按 payload turn_id, 不依赖 chat record).
+    // build 223 修竞态: chat record 常先于 chain POST thinking 到达, 第一次 GET 会空.
+    // 空结果**不**标 fetched, 1s/2s/5s 退避重试三次再 give up; 拿到非空才永久标 fetched.
+    func fetchThinkingForTurn(_ tid: String) {
+        guard !tid.isEmpty else { return }
+        // 已成功拉到 / 已在重试中 → 不重复起循环.
+        if thinkingByTurn[tid] != nil || thinkingFetchedTurns.contains(tid) || thinkingInFlightTurns.contains(tid) { return }
+        thinkingInFlightTurns.insert(tid)
+        Task { [weak self] in
+            let delays: [UInt64] = [0, 1_000_000_000, 2_000_000_000, 5_000_000_000] // 即刻 + 1s/2s/5s
+            for (i, delay) in delays.enumerated() {
+                if delay > 0 { try? await Task.sleep(nanoseconds: delay) }
+                if let text = await ChatNetworkClient.shared.fetchThinking(turnId: tid) {
+                    await MainActor.run {
+                        self?.thinkingByTurn[tid] = text
+                        self?.thinkingFetchedTurns.insert(tid)
+                        self?.thinkingInFlightTurns.remove(tid)
+                    }
+                    return
+                }
+                // 空: 最后一次仍空 → give up (标 fetched 停重试), 否则继续退避.
+                if i == delays.count - 1 {
+                    await MainActor.run {
+                        self?.thinkingFetchedTurns.insert(tid)
+                        self?.thinkingInFlightTurns.remove(tid)
+                    }
                 }
             }
         }

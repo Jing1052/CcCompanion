@@ -12,6 +12,11 @@
 import UIKit
 import UserNotifications
 
+extension Notification.Name {
+    // Phase 3 (thinking-stream-render): silent push 带 turn_id 到达 → 通知 ChatViewModel 拉 thinking.
+    static let ccThinkingPending = Notification.Name("CcThinkingPending")
+}
+
 class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
 
     func application(
@@ -45,6 +50,12 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         didReceiveRemoteNotification userInfo: [AnyHashable: Any],
         fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void
     ) {
+        // Phase 3 (thinking-stream-render, build 223): server POST /v1/thinking 后发 content-available
+        // silent push, payload 带 turn_id. 解出来广播给 ChatViewModel 直接按 turn_id 拉 thinking,
+        // 不依赖新 chat record (修空 fetch 竞态的第三条路). 解不出 turn_id 静默, 不弹 alert.
+        if let tid = userInfo["turn_id"] as? String, !tid.isEmpty {
+            NotificationCenter.default.post(name: .ccThinkingPending, object: nil, userInfo: ["turn_id": tid])
+        }
         completionHandler(.newData)
     }
 
