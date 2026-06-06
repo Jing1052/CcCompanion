@@ -2840,9 +2840,35 @@ struct ChatView: View {
             photoItems = []
             Task {
                 // 单选/多选统一进缩略图预览条，用户可写 caption 后一起发
+                // 2026-06-06 修发图静默失败: loadTransferable 对 iCloud 未下载的原图会间歇性失败,
+                // 旧代码 try? 吞错且无 else, 失败的图静默消失 (用户报告"选图后没反应")。
+                // 现在失败自动重试一次 (原图缓存后第二次多半成功), 仍失败用 lastError 提示。
+                var failedCount = 0
                 for item in items {
-                    if let data = try? await item.loadTransferable(type: Data.self) {
+                    var loaded: Data? = nil
+                    do {
+                        loaded = try await item.loadTransferable(type: Data.self)
+                    } catch {
+                        print("[photo] loadTransferable failed: \(error)")
+                    }
+                    if loaded == nil {
+                        try? await Task.sleep(nanoseconds: 1_200_000_000)
+                        do {
+                            loaded = try await item.loadTransferable(type: Data.self)
+                        } catch {
+                            print("[photo] loadTransferable retry failed: \(error)")
+                        }
+                    }
+                    if let data = loaded {
                         await MainActor.run { selectedImagePreviews.append(ImagePreview(data: data)) }
+                    } else {
+                        failedCount += 1
+                    }
+                }
+                if failedCount > 0 {
+                    let n = failedCount
+                    await MainActor.run {
+                        vm.lastError = "\(n) 张图片加载失败，原图可能还在 iCloud，请稍后重选"
                     }
                 }
             }

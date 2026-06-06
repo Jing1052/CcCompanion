@@ -303,7 +303,22 @@ struct GroupChatView: View {
             guard let first = newItems.first else { return }
             photoItems = []
             Task {
-                if let data = try? await first.loadTransferable(type: Data.self) {
+                // 2026-06-06 修发图静默失败: 同 ChatView, loadTransferable 失败重试一次, 仍失败 toast 提示
+                var loaded: Data? = nil
+                do {
+                    loaded = try await first.loadTransferable(type: Data.self)
+                } catch {
+                    print("[group photo] loadTransferable failed: \(error)")
+                }
+                if loaded == nil {
+                    try? await Task.sleep(nanoseconds: 1_200_000_000)
+                    do {
+                        loaded = try await first.loadTransferable(type: Data.self)
+                    } catch {
+                        print("[group photo] loadTransferable retry failed: \(error)")
+                    }
+                }
+                if let data = loaded {
                     pendingAttachment = PendingAttachment(
                         data: data,
                         filename: "image_\(Int(Date().timeIntervalSince1970)).jpg",
@@ -311,6 +326,8 @@ struct GroupChatView: View {
                     )
                     pendingCaption = ""
                     pendingMentions = []
+                } else {
+                    inputToast = "图片加载失败，原图可能还在 iCloud，请稍后重选"
                 }
             }
         }
