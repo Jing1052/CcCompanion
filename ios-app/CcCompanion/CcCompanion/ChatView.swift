@@ -644,6 +644,16 @@ final class ChatViewModel: ObservableObject {
     private var thinkingFetchedTurns: Set<String> = []
     // 正在重试循环中的 turn_id, 防 push + poll 双触发起重复循环.
     private var thinkingInFlightTurns: Set<String> = []
+    // 2026-06-11 thinking 占位动画: 该 turn thinking 在路上但还没拉到 → anchor 位显示「正在思考」占位.
+    @Published private(set) var thinkingPlaceholderTurns: Set<String> = []
+    // 连续 N 个 turn 拉空 → 判定此 server 无 thinking 管道, 后续不显示占位 (UserDefaults 持久, 真拉到内容即重置).
+    private var consecutiveEmptyThinkingTurns: Int = 0
+    private let thinkingEmptyTurnThreshold = 3
+    private static let noThinkingPipelineKey = "cc_no_thinking_pipeline"
+    private var noThinkingPipeline: Bool {
+        get { UserDefaults.standard.bool(forKey: Self.noThinkingPipelineKey) }
+        set { UserDefaults.standard.set(newValue, forKey: Self.noThinkingPipelineKey) }
+    }
     // Phase 3 (build 223): silent push 带 turn_id 到达 → 直接拉 thinking, 不等下一次 chat poll.
     private var thinkingPushObserver: NSObjectProtocol?
 
@@ -1074,33 +1084,51 @@ final class ChatViewModel: ObservableObject {
         if force { thinkingFetchedTurns.remove(tid) }
         if thinkingFetchedTurns.contains(tid) || thinkingInFlightTurns.contains(tid) { return }
         thinkingInFlightTurns.insert(tid)
+        // 占位: 初次 poll 路 (非 force push 路) 且未判定无管道时, 该 turn anchor 位显示「正在思考」占位.
+        if !force && !noThinkingPipeline { thinkingPlaceholderTurns.insert(tid) }
         Task { [weak self] in
             // 退避累计 ~89s: 0,1,3,6,11,19,29,44,64,89s — 在 thinking 晚到 ~30s 前后多次 catch, 不靠 flaky push.
             let delays: [UInt64] = [0, 1, 2, 3, 5, 8, 10, 15, 20, 25].map { UInt64($0) * 1_000_000_000 }
             for (i, delay) in delays.enumerated() {
                 if delay > 0 { try? await Task.sleep(nanoseconds: delay) }
                 if let text = await ChatNetworkClient.shared.fetchThinking(turnId: tid) {
-                    await MainActor.run {
-                        self?.thinkingByTurn[tid] = text
-                        self?.thinkingFetchedTurns.insert(tid)
-                        self?.thinkingInFlightTurns.remove(tid)
-                    }
+                    await MainActor.run { self?.thinkingTurnLoaded(tid, text: text) }
                     return
                 }
                 // 退避耗尽仍空 → 标 give-up 停 poll 循环 (防无限轮询); silent push 可用 force 重置再拉.
                 if i == delays.count - 1 {
-                    await MainActor.run {
-                        self?.thinkingFetchedTurns.insert(tid)
-                        self?.thinkingInFlightTurns.remove(tid)
-                    }
+                    await MainActor.run { self?.thinkingTurnGaveUp(tid) }
                 }
             }
         }
     }
 
+    // 拉到非空 thinking → 卡片原地替占位; 重置「无管道」判定.
+    @MainActor private func thinkingTurnLoaded(_ tid: String, text: String) {
+        thinkingByTurn[tid] = text
+        thinkingFetchedTurns.insert(tid)
+        thinkingInFlightTurns.remove(tid)
+        thinkingPlaceholderTurns.remove(tid)
+        consecutiveEmptyThinkingTurns = 0
+        noThinkingPipeline = false
+    }
+
+    // 退避耗尽仍空 → 占位淡出; 连续 N 个 turn 全空则判定此 server 无 thinking 管道 (持久, 拉到内容即重置).
+    @MainActor private func thinkingTurnGaveUp(_ tid: String) {
+        thinkingFetchedTurns.insert(tid)
+        thinkingInFlightTurns.remove(tid)
+        withAnimation(.easeOut(duration: 0.45)) { _ = thinkingPlaceholderTurns.remove(tid) }
+        if noThinkingPipeline == false {
+            consecutiveEmptyThinkingTurns += 1
+            if consecutiveEmptyThinkingTurns >= thinkingEmptyTurnThreshold { noThinkingPipeline = true }
+        }
+    }
+
     /// 当前显示窗口里, 某 turn_id 第一条 assistant 消息的 ts (用来决定 ThinkingChip 挂哪条上, 一 turn 只挂一次).
+    // 内容无关: 只判「这条 msg 是不是该 turn 的 thinking 挂载锚位」(一 turn 第一条 assistant).
+    // 卡片 / 占位 / 不显示 由渲染层按 thinkingByTurn / thinkingPlaceholderTurns 决定 (原地切换不跳).
     func isThinkingChipAnchor(_ msg: ChatMessage) -> Bool {
-        guard msg.role == "assistant", let tid = msg.turnId, thinkingByTurn[tid] != nil else { return false }
+        guard msg.role == "assistant", let tid = msg.turnId else { return false }
         let firstTsForTurn = messages.first(where: { $0.turnId == tid && $0.role == "assistant" })?.ts
         return firstTsForTurn == msg.ts
     }
@@ -4122,9 +4150,15 @@ private struct ChatListView: View {
                 ))
         case .message(let msg, let showTime):
             VStack(alignment: .leading, spacing: 2) {
-                // Phase 2/3 (thinking-stream-render): 该 turn 第一条 assistant 消息且 thinking 已拉到 → 上方挂折叠卡片.
-                if vm.isThinkingChipAnchor(msg), let tid = msg.turnId, let think = vm.thinkingByTurn[tid] {
-                    ThinkingChip(text: think)
+                // Phase 2/3 (thinking-stream-render) + 2026-06-11 占位动画: 该 turn 第一条 assistant 消息上方,
+                // thinking 已拉到 → 折叠卡片; 还在路上 → 「正在思考」占位 (原地, 拉到内容卡片替占位不跳).
+                if vm.isThinkingChipAnchor(msg), let tid = msg.turnId {
+                    if let think = vm.thinkingByTurn[tid] {
+                        ThinkingChip(text: think)
+                    } else if vm.thinkingPlaceholderTurns.contains(tid) {
+                        ThinkingPlaceholder()
+                            .transition(.opacity)
+                    }
                 }
                 ChatMessageListRow(
                 message: msg,
@@ -4555,6 +4589,53 @@ private struct ThinkingChip: View {
             Spacer(minLength: 0)
         }
         .padding(.trailing, 12)
+    }
+}
+
+// 2026-06-11 thinking 占位动画: 卡片的 loading 态. 复用 ThinkingChip 的时间轴侧栏 (dot + 细灰线),
+// 右侧「thinking」italic + 三个错峰呼吸的小圆点. 拉到内容时原地被 ThinkingChip 替掉, 同左栏不横跳.
+private struct ThinkingPlaceholder: View {
+    @State private var animate = false
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            VStack(spacing: 0) {
+                Circle()
+                    .fill(Color.ccTextDim.opacity(0.55))
+                    .frame(width: 6, height: 6)
+                    .padding(.top, 5)
+                Rectangle()
+                    .fill(Color.ccTextDim.opacity(0.22))
+                    .frame(width: 1)
+                    .frame(maxHeight: .infinity)
+            }
+            .frame(width: 16)
+
+            HStack(spacing: 5) {
+                Text("thinking")
+                    .font(.ccSerifAdaptive(size: 12))
+                    .italic()
+                HStack(spacing: 3) {
+                    ForEach(0..<3, id: \.self) { i in
+                        Circle()
+                            .fill(Color.ccTextDim)
+                            .frame(width: 4, height: 4)
+                            .opacity(animate ? 1.0 : 0.25)
+                            .animation(
+                                .easeInOut(duration: 0.55)
+                                    .repeatForever(autoreverses: true)
+                                    .delay(Double(i) * 0.18),
+                                value: animate
+                            )
+                    }
+                }
+                .padding(.top, 1)
+            }
+            .foregroundStyle(Color.ccTextDim)
+            Spacer(minLength: 0)
+        }
+        .padding(.trailing, 12)
+        .onAppear { animate = true }
     }
 }
 
