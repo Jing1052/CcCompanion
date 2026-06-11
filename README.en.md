@@ -22,6 +22,7 @@ The whole thing is **local-first** — your messages never go through our server
 ## Features
 
 - **Chat** — send a message from iPhone, see Claude Code's reply land back. Streaming, history, search, jump-to-message, favorites, attachments (image / file).
+- **Thinking cards** (build 231+) — an expandable card above each reply showing a live summary of Claude's reasoning: what it considered, how it broke down your question. Small one-time setup, see [`docs/THINKING_CARD_SETUP.md`](docs/THINKING_CARD_SETUP.md).
 - **Terminal** — inline view of the `tmux` session running `claude` on your Mac. Tap to expand. Useful for "what did claude just do?" without unlocking the Mac.
 - **Slash commands** — `/new`, `/list`, `/switch <sid>`, `/stop`, `/compact`, `/clear`, `/help`. Multi-session aware.
 - **Multi-endpoint** — chain multiple server URLs (Tailscale `100.x` + LAN `10.x` + localhost) with auto-fallback ping. Travel between networks, the app picks the live one.

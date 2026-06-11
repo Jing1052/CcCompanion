@@ -34,6 +34,11 @@
 # Env:
 #   CCC_SERVER_URL  default http://127.0.0.1:8795
 #   CCC_AUTH_TOKEN  shared_secret 跟 server config.toml 对齐 (写接口必须)
+#
+# Thinking 卡片 (build 231+, 可选):
+#   claude 启动命令加 --thinking-display summarized 后, 本 hook 会自动把每轮的
+#   思考摘要 POST 给 /v1/thinking, iOS 端消息上方渲染可展开的思考卡片.
+#   不开 flag 行为不变. 配置与原理见 docs/THINKING_CARD_SETUP.md
 
 set -uo pipefail
 
@@ -175,6 +180,94 @@ if [ "$HTTP_CODE" = "200" ]; then
     log "posted to /chat/append ok (chars=${#LAST_ASSISTANT})"
 else
     log "POST /chat/append failed http=$HTTP_CODE body=$(cat /tmp/ccc_stop_hook.curlout 2>/dev/null | head -c 200)"
+fi
+
+# ---- thinking card (build 231+, optional) ----
+# 若 claude 启动命令带 `--thinking-display summarized`, transcript 的 thinking 块
+# 会带明文摘要 (轻量模型实时转写, 非原始思考). 这里抽出来 POST /v1/thinking,
+# iOS 端思考卡片按 turn_id 渲染. 没开 flag 时 thinking 恒为空, 此段静默跳过,
+# 行为跟旧版完全一致. 配置与原理详见 docs/THINKING_CARD_SETUP.md
+if [ "$HTTP_CODE" = "200" ]; then
+    # turn_id 从 /chat/append 的 ack 里拿 (server 对 role=assistant 生成并落 record)
+    TURN_ID=$(python3 -c '
+import json
+try:
+    with open("/tmp/ccc_stop_hook.curlout", encoding="utf-8") as f:
+        print(json.load(f).get("record", {}).get("turn_id") or "")
+except Exception:
+    print("")
+' 2>/dev/null)
+
+    # 倒序扫 transcript 抽本轮 thinking 簇. 边界规则: 还没收到 thinking 之前遇到
+    # user 行只跳过 (transcript 里常有注入型 user 行), 收到之后再遇真 user 行才停;
+    # tool_result 型 user 行永远跳过. 扫描上限 120 行.
+    REVERSE_CAT_T="tail -r"
+    if ! tail -r /dev/null 2>/dev/null; then
+        REVERSE_CAT_T="tac"
+    fi
+    THINKING_TEXT=$($REVERSE_CAT_T "$TRANSCRIPT_PATH" | python3 -c '
+import json, sys
+
+def is_tool_result_user(obj):
+    content = obj.get("message", {}).get("content", [])
+    return isinstance(content, list) and any(
+        isinstance(c, dict) and c.get("type") == "tool_result" for c in content
+    )
+
+collected = []
+scanned = 0
+for line in sys.stdin:
+    scanned += 1
+    if scanned > 120:
+        break
+    line = line.strip()
+    if not line:
+        continue
+    try:
+        obj = json.loads(line)
+    except Exception:
+        continue
+    t = obj.get("type")
+    if t == "user":
+        if is_tool_result_user(obj):
+            continue
+        if collected:
+            break
+        continue
+    if t == "assistant":
+        content = obj.get("message", {}).get("content", [])
+        parts = [
+            c.get("thinking", "")
+            for c in content
+            if isinstance(c, dict) and c.get("type") == "thinking" and c.get("thinking")
+        ]
+        if parts:
+            collected.append("\n".join(parts))
+collected.reverse()
+print("\n\n".join(collected))
+' 2>/dev/null)
+
+    if [ -n "$THINKING_TEXT" ] && [ -n "$TURN_ID" ]; then
+        THINKING_PAYLOAD=$(THINKING_TEXT="$THINKING_TEXT" TURN_ID="$TURN_ID" python3 -c '
+import json, os
+print(json.dumps({
+    "turn_id": os.environ["TURN_ID"],
+    "thinking": os.environ["THINKING_TEXT"],
+    "session_id": "ccc-stop-hook",
+}))
+')
+        T_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+            -X POST "$SERVER_URL/v1/thinking" \
+            -H "Content-Type: application/json" \
+            -H "X-Auth-Token: $AUTH_TOKEN" \
+            --data "$THINKING_PAYLOAD" \
+            --max-time 5 2>>"$LOG_PATH")
+        if [ "$T_CODE" = "200" ]; then
+            log "posted to /v1/thinking ok (turn=$TURN_ID chars=${#THINKING_TEXT})"
+        else
+            log "POST /v1/thinking failed http=$T_CODE (non-blocking)"
+        fi
+    fi
 fi
 
 exit 0

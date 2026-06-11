@@ -22,6 +22,7 @@ CcCompanion 两块:
 ## 它能做什么
 
 - **Chat** — iPhone 发一句, Claude Code 回的话推回来。streaming, 历史, 搜索, 跳消息, 收藏, 附件 (图片 / 文件)。
+- **思考卡片** (build 231+) — 每条回复上方一张可展开的卡片, 实时显示 Claude 回你这句时的思考摘要: 它在想什么、怎么拆你的问题。需少量配置, 见 [`docs/THINKING_CARD_SETUP.md`](docs/THINKING_CARD_SETUP.md)。
 - **Terminal** — 内嵌你 Mac 那边 `tmux` 跑 `claude` 的 session, 点开看 "claude 刚干了啥", 不用回去解锁 Mac。
 - **斜杠命令** — `/new`, `/list`, `/switch <sid>`, `/stop`, `/compact`, `/clear`, `/help`. 多 session 跟随当前 active。
 - **多 endpoint** — 一个 app 配多个 server URL (Tailscale `100.x` + LAN `10.x` + localhost), 自动 ping 切活的。换 wifi 自动跟。
