@@ -8,9 +8,12 @@
 	<false/>
 	<key>NSAppTransportSecurity</key>
 	<dict>
+		<!-- iOS 10+: 任何「更具体」的 Allows 键（含 NSAllowsLocalNetworking）存在时，
+		     系统会忽略 NSAllowsArbitraryLoads（Apple ATS 文档明确行为）。
+		     5-17 加全局放行时留着 LocalNetworking，导致放行从未生效，
+		     Tailscale CGNAT 段 (100.64/10) 持续被 ATS 拦。只留 ArbitraryLoads，
+		     它本身已覆盖局域网场景。 -->
 		<key>NSAllowsArbitraryLoads</key>
-		<true/>
-		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
 	<key>NSCameraUsageDescription</key>
