@@ -1102,6 +1102,27 @@ final class ChatViewModel: ObservableObject {
         return Date().timeIntervalSince(date) <= thinkingFreshTurnWindow
     }
 
+    // 当前批次头 turn_id: messages 里最后一条 user 消息之后, 按 (ts,id) 确定性排序第一条 assistant 的 turn_id.
+    // 无 user 消息 → 定不了批次头, 返回 nil (调用方放行, 维持现行为).
+    private func currentBatchHeadTurnId() -> String? {
+        guard let lastUserTs = messages.filter({ $0.role == "user" }).map(\.ts).max() else { return nil }
+        return messages
+            .filter { $0.role == "assistant" && $0.turnId != nil && $0.ts > lastUserTs }
+            .min(by: { ($0.ts, $0.id) < ($1.ts, $1.id) })?
+            .turnId
+    }
+
+    // batch-head 门 (1125 收尾): 占位只给批次头. case (b) 下姊妹气泡各自一个 turn_id, 但 stop hook 一个 chain turn
+    // 只 POST 一次 thinking, 落在批次头的 turn_id 上 → 非头的姊妹气泡 GET /v1/thinking 永远 records:[], 占位是空欢喜.
+    // 放行例外 (维持 dd320c8 现行为, 别误杀): ① 该 tid 气泡还没落地 (push 先于 chat record, messages 查无);
+    // ② 找不到 user 消息定不了批次头 (如 reminder 触发的连续主动 turn). 已知 tradeoff: 连续两 turn 中间无 user 时,
+    // 第二个 turn 的头不是"最后 user 之后第一条" → 拿不到占位, 卡片照常冒, 接受.
+    private func passesBatchHeadGate(_ tid: String) -> Bool {
+        guard messages.contains(where: { $0.turnId == tid && $0.role == "assistant" }) else { return true }
+        guard let head = currentBatchHeadTurnId() else { return true }
+        return head == tid
+    }
+
     func fetchThinkingForTurn(_ tid: String, force: Bool = false) {
         guard !tid.isEmpty else { return }
         if thinkingByTurn[tid] != nil { return }          // 已成功拉到 → 不重复
@@ -1109,9 +1130,11 @@ final class ChatViewModel: ObservableObject {
         if force { thinkingFetchedTurns.remove(tid) }
         if thinkingFetchedTurns.contains(tid) || thinkingInFlightTurns.contains(tid) { return }
         thinkingInFlightTurns.insert(tid)
-        // 占位: 初次 poll 路 (非 force push 路) + 未判定无管道 + 该 turn 新鲜 (H1) 才冒占位.
-        // 历史回填的老 turn 不新鲜 → 只静默 fetch (卡片该冒还冒), 不插占位 → 历史气泡零占位.
-        if !force && !noThinkingPipeline && isFreshThinkingTurn(tid) { thinkingPlaceholderSince[tid] = Date() }
+        // 占位: 初次 poll 路 (非 force push 路) + 未判定无管道 + 该 turn 新鲜 (H1) + 是批次头 (1125) 才冒占位.
+        // 历史回填老 turn 不新鲜 → 只静默 fetch 不插占位; 新鲜批次的非头姊妹气泡 → 拿不到 thinking, 不插占位免空欢喜.
+        if !force && !noThinkingPipeline && isFreshThinkingTurn(tid) && passesBatchHeadGate(tid) {
+            thinkingPlaceholderSince[tid] = Date()
+        }
         Task { [weak self] in
             // 退避累计 ~89s: 0,1,3,6,11,19,29,44,64,89s — 在 thinking 晚到 ~30s 前后多次 catch, 不靠 flaky push.
             let delays: [UInt64] = [0, 1, 2, 3, 5, 8, 10, 15, 20, 25].map { UInt64($0) * 1_000_000_000 }
