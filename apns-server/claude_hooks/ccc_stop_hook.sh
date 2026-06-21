@@ -301,6 +301,44 @@ print(json.dumps({
         else
             log "POST /v1/thinking failed http=$T_CODE (non-blocking)"
         fi
+
+        # 可选: 把同一份思考也镜像到 Telegram (可折叠引用块). 统一"抠思考"的核 ——
+        # 本脚本的 THINKING_TEXT 已带 flush 等待 + 收齐一轮多块, 让 TG 复用它即可,
+        # 旧的 send_thinking.py 可退役. 配置 (TG_TOKEN/TG_CHAT_ID/TG_PROXY) 放本机
+        # ~/.claude/.tg_thinking.conf, 仓库里不存任何密钥; 无配置文件则静默跳过.
+        # 按 turn_id 去重, 避免和别处重复发送.
+        TG_CONF="$HOME/.claude/.tg_thinking.conf"
+        if [ -f "$TG_CONF" ]; then
+            # shellcheck disable=SC1090
+            . "$TG_CONF"
+            TG_STATE="$HOME/.claude/.last_thinking_sent"
+            if [ -n "${TG_TOKEN:-}" ] && [ -n "${TG_CHAT_ID:-}" ] \
+                && [ "$(cat "$TG_STATE" 2>/dev/null)" != "$TURN_ID" ]; then
+                TG_PAYLOAD=$(THINKING_TEXT="$THINKING_TEXT" TG_CHAT_ID="$TG_CHAT_ID" python3 -c '
+import json, os, html
+b = html.escape(os.environ["THINKING_TEXT"])
+if len(b) > 3800:
+    b = b[:3800] + "..."
+print(json.dumps({
+    "chat_id": os.environ["TG_CHAT_ID"],
+    "text": "<blockquote expandable>\U0001f4ad " + b + "</blockquote>",
+    "parse_mode": "HTML",
+}))
+')
+                TG_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+                    ${TG_PROXY:+--proxy "$TG_PROXY"} \
+                    -X POST "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
+                    -H "Content-Type: application/json" \
+                    --data "$TG_PAYLOAD" \
+                    --max-time 20 2>>"$LOG_PATH")
+                if [ "$TG_CODE" = "200" ]; then
+                    log "mirrored thinking to TG ok (turn=$TURN_ID)"
+                    echo "$TURN_ID" > "$TG_STATE"
+                else
+                    log "TG mirror failed http=$TG_CODE (non-blocking)"
+                fi
+            fi
+        fi
     fi
 fi
 
