@@ -3229,18 +3229,19 @@ class PushHandler(BaseHTTPRequestHandler):
         tts_hint = ""
         if self.state.settings.get("tts_enabled"):
             tts_hint = "[语音模式 这一条带标点回复]\n"
-        injected = f"{ts_prefix} {tts_hint}{text}"
+        source_tag = "[Still Here] " if body.get("_source_tag", True) else ""
+        injected = f"{ts_prefix} {source_tag}{tts_hint}{text}"
         if rec.get("location"):
             loc = rec["location"]
             label = loc.get("label", "")
             loc_str = f"[位置 lat={loc['lat']:.6f} lon={loc['lon']:.6f}{(' ' + label) if label else ''}]"
-            injected = f"{ts_prefix} {tts_hint}{loc_str}"
+            injected = f"{ts_prefix} {source_tag}{tts_hint}{loc_str}"
             if text:
                 injected = f"{injected}\n{text}"
         if rec.get("quoted_text"):
-            injected = f"{ts_prefix} {tts_hint}[引用 \"{rec['quoted_text']}\"]\n{text}"
+            injected = f"{ts_prefix} {source_tag}{tts_hint}[引用 \"{rec['quoted_text']}\"]\n{text}"
             if rec.get("location"):
-                injected = f"{ts_prefix} {tts_hint}[引用 \"{rec['quoted_text']}\"]\n{loc_str}"
+                injected = f"{ts_prefix} {source_tag}{tts_hint}[引用 \"{rec['quoted_text']}\"]\n{loc_str}"
                 if text:
                     injected = f"{injected}\n{text}"
         # set typing — Cc 收到 message 在 thinking
