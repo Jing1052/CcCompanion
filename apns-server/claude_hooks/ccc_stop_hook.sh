@@ -307,8 +307,38 @@ print(json.dumps({
         # 旧的 send_thinking.py 可退役. 配置 (TG_TOKEN/TG_CHAT_ID/TG_PROXY) 放本机
         # ~/.claude/.tg_thinking.conf, 仓库里不存任何密钥; 无配置文件则静默跳过.
         # 按 turn_id 去重, 避免和别处重复发送.
+        #
+        # 来源门控 (避免孤儿思考): 一个 tmux cc 同时接 App 和 TG; 只有"本轮 user
+        # 来自 TG"时才镜像到 TG, 否则 App 来源的思考会漏到 TG 变成"没对话光有思考".
+        # 判据: 最近一条真实 user (跳过 tool_result) 的正文是否含 telegram channel 标记.
+        IS_TG=$($REVERSE_CAT_T "$TRANSCRIPT_PATH" | python3 -c '
+import json, sys
+
+def is_tool_result_user(obj):
+    c = (obj.get("message") or {}).get("content")
+    return isinstance(c, list) and any(
+        isinstance(x, dict) and x.get("type") == "tool_result" for x in c)
+
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    try:
+        obj = json.loads(line)
+    except Exception:
+        continue
+    if obj.get("type") != "user":
+        continue
+    if is_tool_result_user(obj):
+        continue
+    c = (obj.get("message") or {}).get("content")
+    text = c if isinstance(c, str) else json.dumps(c, ensure_ascii=False)
+    print("1" if "channel source=\"plugin:telegram" in text else "0")
+    break
+' 2>/dev/null)
+
         TG_CONF="$HOME/.claude/.tg_thinking.conf"
-        if [ -f "$TG_CONF" ]; then
+        if [ "$IS_TG" = "1" ] && [ -f "$TG_CONF" ]; then
             # shellcheck disable=SC1090
             . "$TG_CONF"
             TG_STATE="$HOME/.claude/.last_thinking_sent"
