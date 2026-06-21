@@ -205,6 +205,40 @@ except Exception:
     if ! tail -r /dev/null 2>/dev/null; then
         REVERSE_CAT_T="tac"
     fi
+
+    # 防错位 (off-by-one): 用 stdin 的 last_assistant_message 当正文时, 本轮的
+    # thinking 块可能还没 flush 到 transcript 文件; 直接扫会抓到上一轮的思考, POST
+    # 到本轮 turn_id 上 → 每条卡片显示上一句的思考. 先等到 transcript 末尾"最后一条
+    # assistant 文本"== 本轮正文 (即本轮已落盘, 其 thinking 同 message 也已在), 再扫.
+    # 最多等 ~4.8s; 等不到就照旧扫 (不阻塞, 不会更糟).
+    if [ -n "$DIRECT_LAST" ]; then
+        for _w in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16; do
+            LASTTXT=$($REVERSE_CAT_T "$TRANSCRIPT_PATH" | python3 -c '
+import json, sys
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    try:
+        obj = json.loads(line)
+    except Exception:
+        continue
+    if obj.get("type") == "assistant":
+        content = obj.get("message", {}).get("content", [])
+        parts = [
+            c.get("text", "")
+            for c in content
+            if isinstance(c, dict) and c.get("type") == "text" and c.get("text")
+        ]
+        if parts:
+            print("\n".join(parts))
+            break
+' 2>/dev/null)
+            [ "$LASTTXT" = "$LAST_ASSISTANT" ] && break
+            sleep 0.3
+        done
+    fi
+
     THINKING_TEXT=$($REVERSE_CAT_T "$TRANSCRIPT_PATH" | python3 -c '
 import json, sys
 
