@@ -310,9 +310,14 @@ print(json.dumps({
         #
         # 来源门控 (避免孤儿思考): 一个 tmux cc 同时接 App 和 TG; 只有"本轮 user
         # 来自 TG"时才镜像到 TG, 否则 App 来源的思考会漏到 TG 变成"没对话光有思考".
-        # 判据: 最近一条真实 user (跳过 tool_result) 的正文是否含 telegram channel 标记.
+        # 判据 (双轨): 最近一条真实 user (跳过 tool_result) 是不是 TG 来源.
+        #   旧 TG: 正文含 <channel source="plugin:telegram...">
+        #   新 TG: 正文以 [YYYY-MM-DD HH:MM:SS] 开头 且 不含 [Still Here]
+        #   App  : apns-server 注入, 正文含 [Still Here] 标签 → 排除 (只进 /v1/thinking)
         IS_TG=$($REVERSE_CAT_T "$TRANSCRIPT_PATH" | python3 -c '
-import json, sys
+import json, re, sys
+
+TS_RE = re.compile(r"^\s*\[\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\]")
 
 def is_tool_result_user(obj):
     c = (obj.get("message") or {}).get("content")
@@ -333,7 +338,10 @@ for line in sys.stdin:
         continue
     c = (obj.get("message") or {}).get("content")
     text = c if isinstance(c, str) else json.dumps(c, ensure_ascii=False)
-    print("1" if "channel source=\"plugin:telegram" in text else "0")
+    is_app = "[Still Here]" in text
+    is_tg = ("channel source=\"plugin:telegram" in text) or (
+        bool(TS_RE.match(text)) and not is_app)
+    print("1" if is_tg else "0")
     break
 ' 2>/dev/null)
 
