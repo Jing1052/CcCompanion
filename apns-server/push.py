@@ -3327,6 +3327,9 @@ class PushHandler(BaseHTTPRequestHandler):
             )
             if paste.returncode != 0:
                 return False, f"tmux paste-buffer failed: {paste.stderr.strip()}"
+            # 等括号粘贴 (-p) 结算完再发 Enter — 否则多行文本 (如带附件路径的 hint)
+            # 还没粘完, 紧跟的 Enter 会被当成粘贴内的换行吞掉, 停在输入框不提交.
+            time.sleep(0.3)
             send = subprocess.run(
                 ["tmux", "send-keys", "-t", session, "Enter"],
                 capture_output=True, text=True, timeout=3,
