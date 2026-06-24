@@ -757,6 +757,9 @@ class PushHandler(BaseHTTPRequestHandler):
                 return
             self._handle_chain_sessions_get()
             return
+        if self.path == "/watcher/mode":
+            self._handle_watcher_mode_get()
+            return
         if self.path.startswith("/attachments/"):
             self._handle_attachment_get()
             return
@@ -1103,10 +1106,48 @@ class PushHandler(BaseHTTPRequestHandler):
                 self.state.settings.set(k, v)
             self._send_json(200, {"ok": True, "settings": self.state.settings.snapshot()})
             return
+        elif self.path == "/watcher/mode":
+            self._handle_watcher_mode_set(body)
+            return
         else:
             self._send_json(404, {"error": "not found"})
 
     # ---------- handlers ----------
+
+    def _watcher_mode_file(self) -> Path:
+        # session-watcher 的热切换档位文件；env 覆盖优先，否则默认家里路径
+        override = os.environ.get("WATCHER_MODE_FILE")
+        if override:
+            return Path(override)
+        return Path(os.path.expanduser("~/session-watcher/.threshold_mode"))
+
+    def _handle_watcher_mode_get(self):
+        # 读 session-watcher 当前档位；不存在/读失败回落默认档 low
+        path = self._watcher_mode_file()
+        try:
+            mode = path.read_text(encoding="utf-8").strip()
+            if mode not in ("low", "high"):
+                mode = "low"
+        except Exception:
+            mode = "low"
+        self._send_json(200, {"mode": mode})
+
+    def _handle_watcher_mode_set(self, body: dict[str, Any]):
+        # 切换 session-watcher 档位；原子写入（.tmp -> replace）
+        mode = body.get("mode")
+        if mode not in ("low", "high"):
+            self._send_json(400, {"error": "mode 只能 low 或 high"})
+            return
+        path = self._watcher_mode_file()
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = path.with_suffix(path.suffix + ".tmp")
+            tmp.write_text(mode, encoding="utf-8")
+            os.replace(tmp, path)
+            logger.info("watcher mode set to %s file=%s", mode, path)
+            self._send_json(200, {"ok": True, "mode": mode})
+        except Exception as e:
+            self._send_json(500, {"error": str(e)})
 
     def _handle_register(self, body: dict[str, Any]):
         token = body.get("token")
@@ -3328,6 +3369,9 @@ class PushHandler(BaseHTTPRequestHandler):
             )
             if paste.returncode != 0:
                 return False, f"tmux paste-buffer failed: {paste.stderr.strip()}"
+            # 等括号粘贴 (-p) 结算完再发 Enter — 否则多行文本 (如带附件路径的 hint)
+            # 还没粘完, 紧跟的 Enter 会被当成粘贴内的换行吞掉, 停在输入框不提交.
+            time.sleep(0.3)
             send = subprocess.run(
                 ["tmux", "send-keys", "-t", session, "Enter"],
                 capture_output=True, text=True, timeout=3,

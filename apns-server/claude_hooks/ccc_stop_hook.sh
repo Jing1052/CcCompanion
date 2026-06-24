@@ -205,6 +205,40 @@ except Exception:
     if ! tail -r /dev/null 2>/dev/null; then
         REVERSE_CAT_T="tac"
     fi
+
+    # 防错位 (off-by-one): 用 stdin 的 last_assistant_message 当正文时, 本轮的
+    # thinking 块可能还没 flush 到 transcript 文件; 直接扫会抓到上一轮的思考, POST
+    # 到本轮 turn_id 上 → 每条卡片显示上一句的思考. 先等到 transcript 末尾"最后一条
+    # assistant 文本"== 本轮正文 (即本轮已落盘, 其 thinking 同 message 也已在), 再扫.
+    # 最多等 ~4.8s; 等不到就照旧扫 (不阻塞, 不会更糟).
+    if [ -n "$DIRECT_LAST" ]; then
+        for _w in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16; do
+            LASTTXT=$($REVERSE_CAT_T "$TRANSCRIPT_PATH" | python3 -c '
+import json, sys
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    try:
+        obj = json.loads(line)
+    except Exception:
+        continue
+    if obj.get("type") == "assistant":
+        content = obj.get("message", {}).get("content", [])
+        parts = [
+            c.get("text", "")
+            for c in content
+            if isinstance(c, dict) and c.get("type") == "text" and c.get("text")
+        ]
+        if parts:
+            print("\n".join(parts))
+            break
+' 2>/dev/null)
+            [ "$LASTTXT" = "$LAST_ASSISTANT" ] && break
+            sleep 0.3
+        done
+    fi
+
     THINKING_TEXT=$($REVERSE_CAT_T "$TRANSCRIPT_PATH" | python3 -c '
 import json, sys
 
@@ -266,6 +300,82 @@ print(json.dumps({
             log "posted to /v1/thinking ok (turn=$TURN_ID chars=${#THINKING_TEXT})"
         else
             log "POST /v1/thinking failed http=$T_CODE (non-blocking)"
+        fi
+
+        # 可选: 把同一份思考也镜像到 Telegram (可折叠引用块). 统一"抠思考"的核 ——
+        # 本脚本的 THINKING_TEXT 已带 flush 等待 + 收齐一轮多块, 让 TG 复用它即可,
+        # 旧的 send_thinking.py 可退役. 配置 (TG_TOKEN/TG_CHAT_ID/TG_PROXY) 放本机
+        # ~/.claude/.tg_thinking.conf, 仓库里不存任何密钥; 无配置文件则静默跳过.
+        # 按 turn_id 去重, 避免和别处重复发送.
+        #
+        # 来源门控 (避免孤儿思考): 一个 tmux cc 同时接 App 和 TG; 只有"本轮 user
+        # 来自 TG"时才镜像到 TG, 否则 App 来源的思考会漏到 TG 变成"没对话光有思考".
+        # 判据 (双轨): 最近一条真实 user (跳过 tool_result) 是不是 TG 来源.
+        #   旧 TG: 正文含 <channel source="plugin:telegram...">
+        #   新 TG: 正文以 [YYYY-MM-DD HH:MM:SS] 开头 且 不含 [Still Here]
+        #   App  : apns-server 注入, 正文含 [Still Here] 标签 → 排除 (只进 /v1/thinking)
+        IS_TG=$($REVERSE_CAT_T "$TRANSCRIPT_PATH" | python3 -c '
+import json, re, sys
+
+TS_RE = re.compile(r"^\s*\[\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\]")
+
+def is_tool_result_user(obj):
+    c = (obj.get("message") or {}).get("content")
+    return isinstance(c, list) and any(
+        isinstance(x, dict) and x.get("type") == "tool_result" for x in c)
+
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    try:
+        obj = json.loads(line)
+    except Exception:
+        continue
+    if obj.get("type") != "user":
+        continue
+    if is_tool_result_user(obj):
+        continue
+    c = (obj.get("message") or {}).get("content")
+    text = c if isinstance(c, str) else json.dumps(c, ensure_ascii=False)
+    is_app = "[Still Here]" in text
+    is_tg = ("channel source=\"plugin:telegram" in text) or (
+        bool(TS_RE.match(text)) and not is_app)
+    print("1" if is_tg else "0")
+    break
+' 2>/dev/null)
+
+        TG_CONF="$HOME/.claude/.tg_thinking.conf"
+        if [ "$IS_TG" = "1" ] && [ -f "$TG_CONF" ]; then
+            # shellcheck disable=SC1090
+            . "$TG_CONF"
+            TG_STATE="$HOME/.claude/.last_thinking_sent"
+            if [ -n "${TG_TOKEN:-}" ] && [ -n "${TG_CHAT_ID:-}" ] \
+                && [ "$(cat "$TG_STATE" 2>/dev/null)" != "$TURN_ID" ]; then
+                TG_PAYLOAD=$(THINKING_TEXT="$THINKING_TEXT" TG_CHAT_ID="$TG_CHAT_ID" python3 -c '
+import json, os, html
+b = html.escape(os.environ["THINKING_TEXT"])
+if len(b) > 3800:
+    b = b[:3800] + "..."
+print(json.dumps({
+    "chat_id": os.environ["TG_CHAT_ID"],
+    "text": "<blockquote expandable>\U0001f4ad " + b + "</blockquote>",
+    "parse_mode": "HTML",
+}))
+')
+                TG_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+                    ${TG_PROXY:+--proxy "$TG_PROXY"} \
+                    -X POST "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
+                    -H "Content-Type: application/json" \
+                    --data "$TG_PAYLOAD" \
+                    --max-time 20 2>>"$LOG_PATH")
+                if [ "$TG_CODE" = "200" ]; then
+                    log "mirrored thinking to TG ok (turn=$TURN_ID)"
+                    echo "$TURN_ID" > "$TG_STATE"
+                else
+                    log "TG mirror failed http=$TG_CODE (non-blocking)"
+                fi
+            fi
         fi
     fi
 fi
