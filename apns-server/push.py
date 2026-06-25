@@ -3961,7 +3961,7 @@ class PushHandler(BaseHTTPRequestHandler):
 
         # 如果是 user 上传 也往主 session 注入一条 hint 让 chain 感知有附件
         if role == "user":
-            hint = f"[用户发了{'图片' if atype == 'image' else '文件'}: {filename}]"
+            hint = f"[小猫发了{'图片' if atype == 'image' else '文件'}: {filename}]"
             if rec.get("location"):
                 loc = rec["location"]
                 label = loc.get("label", "")
