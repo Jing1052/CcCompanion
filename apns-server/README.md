@@ -51,8 +51,26 @@ For security, this server ships with `strict_auth = true` and `allow_remote_cont
 | POST   | `/chain/abort`        | Send Ctrl+C to abort current reply         | shared_secret |
 | POST   | `/tmux/send`          | Inject keys into a tmux session            | shared_secret |
 | POST   | `/register-device-token` | iPhone reports its APNs device token   | none (公开)   |
+| POST   | `/claudep/chat`       | Still Here · claude -p (订阅) 后端桥        | x-cc-secret   |
 
 其它端点 (`/diary/*`, `/group/*`, `/favorites/*`, `/timeline/*`, `/todos/*`, `/calendar/*` etc.) 是给私有客户端用的, CcCompanion iOS app 不调它们。保留在 codebase 里因为 `push.py` 引用了对应 module — 删模块会让 import graph 散架。
+
+### `/claudep/chat` (Still Here · claude -p 后端桥)
+
+Zeabur 网关 (`server.py` 的 `_claudep_relay`) 拼好注入 (魂/实况/记忆/feel) 后, POST 到家里这个端点。
+本机起 `claude -p --output-format stream-json` 子进程 (走家里订阅、保留 MCP/工具),
+把 claude 的 stream-json 逐行翻成 **OpenAI Chat Completions** 协议回去:
+正文 → `delta.content`, 真思维链 (thinking_delta) → `delta.reasoning_content`。
+
+- **请求 body**: `{system: str, messages: [{role, content}], stream: bool, model?: str}`
+  (`messages` 是 OpenAI 风格数组, 整条历史每轮重发; `content` 支持 str 或多模态数组)
+- **鉴权**: header `x-cc-secret` == `shared_secret` (独立于 `X-Auth-Token` 网关)
+- **响应**: `stream=true` → `text/event-stream` (OpenAI chunk + `data: [DONE]`); `stream=false` → 单条 chat.completion JSON
+- **可调环境变量** (都有默认值, 部署侧按需覆盖):
+  - `CLAUDEP_CLAUDE_BIN` — claude 可执行路径 (默认 `claude`, 走 PATH)
+  - `CLAUDEP_CWD` — 子进程工作目录 (默认 `~`)
+  - `CLAUDEP_SYSTEM_FLAG` — system 注入方式 (默认 `--append-system-prompt`; CLI 若支持整体替换可设 `--system-prompt`)
+- **防封号**: claude 子进程继承 apns-server 的 `os.environ` → apns-server 必须带着代理 env (`HTTPS_PROXY` 等) 启动, 子进程才会走墙外 IP。
 
 ---
 

@@ -67,6 +67,7 @@ from usage import UsageReader
 from thinking_store import ThinkingStore
 import todos as todos_mod
 from studyroom import StudyroomDB
+import claudep_bridge
 import subprocess
 import threading
 
@@ -912,6 +913,10 @@ class PushHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         if not self._check_ip_allowed():
+            return
+        # /claudep/chat 走独立的 x-cc-secret 鉴权（契约头），在 X-Auth-Token 网关之前拦截。
+        if self.path == "/claudep/chat":
+            self._handle_claudep_chat()
             return
         if not self._require_write_auth():
             return
@@ -3473,6 +3478,136 @@ class PushHandler(BaseHTTPRequestHandler):
         finally:
             self.state.pet_bus.unsubscribe(q)
             self.state.pet_bubble_bus.unsubscribe(bq)
+
+    def _handle_claudep_chat(self):
+        """POST /claudep/chat — Still Here · claude -p (订阅) 后端桥。
+
+        Zeabur 网关 (server.py _claudep_relay) 拼好注入后打到这里。收
+        {system, messages, stream}，本机跑 claude -p stream-json，翻成 OpenAI
+        Chat Completions SSE（stream=true）或单条 JSON（stream=false）回去。
+        鉴权：header x-cc-secret == shared_secret。
+        """
+        secret = self.state.shared_secret
+        if secret:
+            token = (
+                self.headers.get("x-cc-secret")
+                or self.headers.get("X-CC-Secret")
+                or self.headers.get("X-Auth-Token")
+                or ""
+            )
+            if token != secret:
+                self._send_json(401, {"error": "unauthorized"})
+                return
+        try:
+            body = self._read_body()
+        except Exception as e:
+            self._send_json(400, {"error": f"bad json: {e}"})
+            return
+        system = str(body.get("system") or "")
+        messages = body.get("messages") or []
+        stream = bool(body.get("stream", True))
+        model = str(body.get("model") or "claude-p")
+        if not isinstance(messages, list) or not messages:
+            self._send_json(400, {"error": "messages required"})
+            return
+        prompt, system_extra = claudep_bridge.render_messages(messages)
+        if system_extra:
+            system = (system + "\n\n" + system_extra) if system else system_extra
+        if not prompt.strip():
+            self._send_json(400, {"error": "no user content in messages"})
+            return
+        try:
+            proc = claudep_bridge.spawn(prompt, system)
+        except FileNotFoundError:
+            self._send_json(
+                500,
+                {"error": "claude binary not found", "hint": "set CLAUDEP_CLAUDE_BIN"},
+            )
+            return
+        except Exception as e:
+            logger.exception("claudep spawn failed")
+            self._send_json(500, {"error": f"spawn failed: {e}"})
+            return
+        if stream:
+            self._claudep_stream_response(proc, model)
+        else:
+            self._claudep_buffered_response(proc, model)
+
+    def _claudep_stream_response(self, proc: subprocess.Popen, model: str):
+        created = int(time.time())
+        cid = "chatcmpl-claudep-" + str(created)
+        try:
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Connection", "keep-alive")
+            # nginx/反代别缓冲 SSE，否则整段憋到结束才吐。
+            self.send_header("X-Accel-Buffering", "no")
+            self.end_headers()
+        except Exception:
+            claudep_bridge.kill(proc)
+            return
+
+        def send_chunk(delta: dict, finish=None):
+            obj = {
+                "id": cid,
+                "object": "chat.completion.chunk",
+                "created": created,
+                "model": model,
+                "choices": [{"index": 0, "delta": delta, "finish_reason": finish}],
+            }
+            self.wfile.write(
+                ("data: " + json.dumps(obj, ensure_ascii=False) + "\n\n").encode("utf-8")
+            )
+            self.wfile.flush()
+
+        try:
+            send_chunk({"role": "assistant"})
+            for kind, text in claudep_bridge.iter_deltas(proc):
+                if kind == "text":
+                    send_chunk({"content": text})
+                else:
+                    send_chunk({"reasoning_content": text})
+            send_chunk({}, finish="stop")
+            self.wfile.write(b"data: [DONE]\n\n")
+            self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+        except Exception:
+            logger.exception("claudep stream failed")
+        finally:
+            claudep_bridge.kill(proc)
+
+    def _claudep_buffered_response(self, proc: subprocess.Popen, model: str):
+        text_parts: list[str] = []
+        reasoning_parts: list[str] = []
+        try:
+            for kind, text in claudep_bridge.iter_deltas(proc):
+                if kind == "text":
+                    text_parts.append(text)
+                else:
+                    reasoning_parts.append(text)
+        except Exception:
+            logger.exception("claudep buffered read failed")
+        finally:
+            claudep_bridge.kill(proc)
+        created = int(time.time())
+        msg: dict[str, Any] = {"role": "assistant", "content": "".join(text_parts)}
+        reasoning = "".join(reasoning_parts)
+        if reasoning:
+            msg["reasoning_content"] = reasoning
+        self._send_json(
+            200,
+            {
+                "id": "chatcmpl-claudep-" + str(created),
+                "object": "chat.completion",
+                "created": created,
+                "model": model,
+                "choices": [
+                    {"index": 0, "message": msg, "finish_reason": "stop"}
+                ],
+            },
+        )
 
     def _handle_pet_activity_post(self, body: dict[str, Any]):
         """POST /pet/activity — chain hook 推 streaming terminal display 行.
