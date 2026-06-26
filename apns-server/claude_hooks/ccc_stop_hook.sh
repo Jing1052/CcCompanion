@@ -57,6 +57,19 @@ log() { echo "[$(date +%Y-%m-%d\ %H:%M:%S)] $*" >> "$LOG_PATH"; }
 # 新版 Claude Code 直接传 last_assistant_message; 没有时 fallback 反扫 transcript.
 INPUT=$(cat 2>/dev/null || echo "{}")
 
+# claude_p (家里订阅后端) 共存: 它起的 `claude -p` 也跑在同一份 ~/.claude 下, 同样会触发
+# 本 Stop 钩子. 若不拦, claude_p 的回复 (本该只回 App 的 API 窗口) 会被误推进 CC 端通道
+# (push.py /chat/append). claude_p 专用一个空 cwd `.claudep_cwd`, 命中即跳过, 井水不犯河水.
+CCC_CWD=$(echo "$INPUT" | python3 -c 'import json,sys
+try: print(json.loads(sys.stdin.read() or "{}").get("cwd") or "")
+except Exception: print("")' 2>/dev/null)
+case "$CCC_CWD" in
+    *"/.claudep_cwd"*)
+        echo "[$(date +%Y-%m-%d\ %H:%M:%S)] skip: claude_p run (cwd=$CCC_CWD)" >> /tmp/ccc_stop_hook.log
+        exit 0
+        ;;
+esac
+
 # 一次性 parse 出 transcript_path 加 last_assistant_message
 PARSED=$(echo "$INPUT" | python3 -c '
 import json, sys
