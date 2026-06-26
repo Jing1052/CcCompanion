@@ -128,6 +128,8 @@ def handle_claudep(h, body):
         auth_err = None
         full_text = ""    # 兜底：claude -p 这次没吐逐字增量时，从 assistant 整段攒
         result_text = ""  # 再兜底：result 事件里的最终文本
+        got_think = False  # 这一轮有没有流式吐过 thinking_delta
+        full_think = ""    # 兜底思考：从 assistant 消息里的 thinking 块攒（CC 钩子用的可靠来源）
         try:
             for line in proc.stdout:
                 line = line.strip()
@@ -146,6 +148,8 @@ def handle_claudep(h, body):
                             full_text += b["text"]
                             if "authenticate" in str(b.get("text", "")):
                                 auth_err = str(b.get("text", ""))[:120]
+                        elif b.get("type") == "thinking" and b.get("thinking"):
+                            full_think += b["thinking"]
                     continue
                 if t == "result":
                     if j.get("result"):
@@ -163,6 +167,7 @@ def handle_claudep(h, body):
                     delta = {"content": d["text"]}
                 elif dt == "thinking_delta" and d.get("thinking"):
                     delta = {"reasoning_content": d["thinking"]}
+                    got_think = True
                 if delta is None:
                     continue
                 if first:
@@ -176,6 +181,15 @@ def handle_claudep(h, body):
                 proc.terminate()
             except Exception:
                 pass
+        # 思考兜底：这一轮没流式吐过 thinking_delta、但 assistant 消息里有 thinking 块
+        # （强不来——原生思考时有时无；transcript/assistant 块是 CC 钩子用的可靠来源）→
+        # 把整段思考补发成 reasoning_content，让 App 端也能折叠出思考链。
+        if not got_think and full_think:
+            _td = {"reasoning_content": full_think}
+            if first:
+                _td["role"] = "assistant"
+                first = False
+            sse(chunk(_td))
         if not got_any:
             # 流式没拿到逐字增量（claude -p 这次没吐 partial）：把整段回复一次性补发，
             # 否则 App 端空屏、可那条回复其实已生成（还会被 Stop 钩子推去别处）。
@@ -195,7 +209,8 @@ def handle_claudep(h, body):
     # ── 非流式：内部仍跑 stream-json（这样思考链也能聚合进 reasoning_content），最后一次性返回 ──
     proc = _spawn()
     body_text = ""
-    think_text = ""
+    think_text = ""    # 流式 thinking_delta 攒的思考
+    asst_think = ""    # 兜底：assistant 消息里的 thinking 块（强不来时的可靠来源）
     auth_err = None
     try:
         for line in proc.stdout:
@@ -215,8 +230,12 @@ def handle_claudep(h, body):
                     think_text += d.get("thinking", "")
             elif t == "assistant":
                 for b in (j.get("message") or {}).get("content", []):
-                    if isinstance(b, dict) and b.get("type") == "text" and "authenticate" in str(b.get("text", "")):
+                    if not isinstance(b, dict):
+                        continue
+                    if b.get("type") == "text" and "authenticate" in str(b.get("text", "")):
                         auth_err = str(b.get("text", ""))[:120]
+                    elif b.get("type") == "thinking" and b.get("thinking"):
+                        asst_think += b["thinking"]
             elif t == "result":
                 if not body_text and j.get("result"):
                     body_text = str(j.get("result"))
@@ -229,7 +248,8 @@ def handle_claudep(h, body):
         h._send_json(502, {"error": "claude_p auth failed: " + auth_err})
         return
     msg = {"role": "assistant", "content": body_text}
-    if think_text:
-        msg["reasoning_content"] = think_text
+    _think = think_text or asst_think   # 流式没吐就用 assistant 块兜底
+    if _think:
+        msg["reasoning_content"] = _think
     h._send_json(200, {"id": cid, "object": "chat.completion", "created": created,
                        "model": model, "choices": [{"index": 0, "message": msg, "finish_reason": "stop"}]})
