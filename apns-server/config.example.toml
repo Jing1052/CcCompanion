@@ -57,3 +57,14 @@ allowed_ips = []
 # default_session sets the tmux session name CcCompanion connects to.
 # Change this to match your own tmux session name.
 # default_session = "cc"
+
+# ── Bug3: Telegram getUpdates 中继（CC 专用 bot）──────────────────────────
+# 配了 cc_bot_token 才启用：apns-server 自己轮询这个 bot 的 getUpdates，收到消息注入 tmux cc，
+# 不依赖 CC 的 plugin:telegram（VPN 断了插件不重连那个坑）。两个 bot 分开用：CC 一个、API 端
+# 网关 webhook 一个，互不冲突。
+# ⚠️ 这个 bot 上不能再有别的 getUpdates 消费者——CC 启动命令里的 `--channels plugin:telegram`
+#    （若用同一个 bot）要去掉，统一由本轮询器收。
+[telegram]
+# cc_bot_token = ""          # CC 专用 bot 的 token（留空=不启用）
+# cc_chat_id   = ""          # 只接受这个 chat 的消息（强烈建议填，否则陌生人能往 CC 注消息）
+# poll_interval = 2          # 空轮询间隔秒（长轮询本身已等 ~25s）

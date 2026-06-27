@@ -294,6 +294,15 @@ class ServerState:
         self.allowed_ips: list[str] = list(server_cfg.get("allowed_ips", []) or [])
         self.default_session: str = server_cfg.get("default_session", "cc")
 
+        # Bug3: Telegram getUpdates 中继（CC 专用 bot）。配了 cc_bot_token 才启用，否则行为不变。
+        tg_cfg = config.get("telegram", {}) or {}
+        self.tg_cc_bot_token: str = str(tg_cfg.get("cc_bot_token", "") or "").strip()
+        self.tg_cc_chat_id: str = str(tg_cfg.get("cc_chat_id", "") or "").strip()
+        self.tg_poll_interval: float = float(tg_cfg.get("poll_interval", 2) or 2)
+        self.tg_offset_path = (
+            Path(self.token_store_path).expanduser().parent / "tg_poller_offset.json"
+        )
+
         if self.apns_enabled:
             self.jwt = APNsJWT(
                 p8_path=self.p8_path,
@@ -4805,6 +4814,15 @@ def run_server(state: ServerState):
         target=cleanup_loop, args=(state,), daemon=True, name="cleanup"
     )
     cleanup_thread.start()
+    # Bug3: Telegram getUpdates 中继线程（配了 telegram.cc_bot_token 才真正轮询）。
+    # 模块缺失/导入失败也不拖垮服务器——仅记一条 warning。
+    try:
+        from tg_poller import tg_poller_loop
+        threading.Thread(
+            target=tg_poller_loop, args=(state,), daemon=True, name="tg-poller"
+        ).start()
+    except Exception as e:
+        logger.warning("tg_poller not started: %s", e)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
