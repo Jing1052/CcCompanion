@@ -3361,16 +3361,26 @@ class PushHandler(BaseHTTPRequestHandler):
                 ["tmux", "load-buffer", "-"],
                 stdin=subprocess.PIPE,
             )
-            p.communicate(input=text.encode("utf-8"))
+            try:
+                p.communicate(input=text.encode("utf-8"), timeout=3)
+            except subprocess.TimeoutExpired:
+                p.kill()
+                return False, "tmux load-buffer timed out"
             paste = subprocess.run(
                 ["tmux", "paste-buffer", "-t", session, "-p"],
                 capture_output=True, text=True, timeout=3,
             )
             if paste.returncode != 0:
                 return False, f"tmux paste-buffer failed: {paste.stderr.strip()}"
-            # 等括号粘贴 (-p) 结算完再发 Enter — 否则多行文本 (如带附件路径的 hint)
-            # 还没粘完, 紧跟的 Enter 会被当成粘贴内的换行吞掉, 停在输入框不提交.
-            time.sleep(0.3)
+            # 等括号粘贴 (-p) 结算完再发 Enter — 否则多行文本 (如带附件路径的图片 hint)
+            # 还没粘完, 紧跟的 Enter 会被当成粘贴内的换行吞掉, 停在输入框不提交 (Bug2:
+            # 发图片+文字 CC 收不到, 要再发一条才一起冒出来). 按"是否多行 + 文本长度"放大
+            # 等待 (封顶 1.5s): 单行短文本沿用 ~0.3s, 多行/长 hint 给足结算时间.
+            _settle = 0.3
+            if "\n" in text:
+                _settle += 0.5
+            _settle += min(len(text) / 2000.0, 0.7)
+            time.sleep(min(_settle, 1.5))
             send = subprocess.run(
                 ["tmux", "send-keys", "-t", session, "Enter"],
                 capture_output=True, text=True, timeout=3,
