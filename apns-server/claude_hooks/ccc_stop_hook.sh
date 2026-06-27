@@ -89,37 +89,43 @@ if [ -z "$TRANSCRIPT_PATH" ] || [ ! -f "$TRANSCRIPT_PATH" ]; then
     exit 0
 fi
 
-# Prefer stdin last_assistant_message (新版 Claude Code 直接给), fallback transcript
-if [ -n "$DIRECT_LAST" ]; then
-    LAST_ASSISTANT="$DIRECT_LAST"
-    log "using stdin last_assistant_message (chars=${#LAST_ASSISTANT})"
-else
-    # Claude Code transcript flush 慢 — 等 file size 稳定 (连续两次相等 或最长 ~3 秒)
-    LAST_SIZE=-1
-    STABLE_COUNT=0
-    for i in 1 2 3 4 5 6 7 8 9 10; do
-        sleep 0.3
-        CUR_SIZE=$(stat -f '%z' "$TRANSCRIPT_PATH" 2>/dev/null \
-                || stat -c '%s' "$TRANSCRIPT_PATH" 2>/dev/null \
-                || echo "0")
-        if [ "$CUR_SIZE" = "$LAST_SIZE" ]; then
-            STABLE_COUNT=$((STABLE_COUNT + 1))
-            [ "$STABLE_COUNT" -ge 2 ] && break
-        else
-            STABLE_COUNT=0
-        fi
-        LAST_SIZE=$CUR_SIZE
-    done
-
-    # transcript 是 JSONL 一行一条 message
-    # 倒着读 抓自上次 user 以来的所有 assistant text part 然后 join
-    # Linux 没 tail -r 用 tac
-    REVERSE_CAT="tail -r"
-    if ! command -v tail >/dev/null 2>&1 || ! tail -r /dev/null 2>/dev/null; then
-        REVERSE_CAT="tac"
+# 始终扫 transcript 收正文——「文字+工具同发」时 stdin 的 last_assistant_message 只有工具
+# 之后那段，会吞掉工具前的文字。所以不能图快直接用 stdin，得从 transcript 把这一轮所有
+# assistant text 都收齐（含工具前那段）。stdin 的 DIRECT_LAST 只当兜底。
+# 先等 transcript flush 稳定（连续两次 size 相等 或最长 ~3 秒）。
+LAST_SIZE=-1
+STABLE_COUNT=0
+for i in 1 2 3 4 5 6 7 8 9 10; do
+    sleep 0.3
+    CUR_SIZE=$(stat -f '%z' "$TRANSCRIPT_PATH" 2>/dev/null \
+            || stat -c '%s' "$TRANSCRIPT_PATH" 2>/dev/null \
+            || echo "0")
+    if [ "$CUR_SIZE" = "$LAST_SIZE" ]; then
+        STABLE_COUNT=$((STABLE_COUNT + 1))
+        [ "$STABLE_COUNT" -ge 2 ] && break
+    else
+        STABLE_COUNT=0
     fi
-    LAST_ASSISTANT=$($REVERSE_CAT "$TRANSCRIPT_PATH" | python3 -c '
+    LAST_SIZE=$CUR_SIZE
+done
+
+# transcript 是 JSONL 一行一条 message。倒着读，收「自上一条**真实** user 以来」的所有
+# assistant text（含工具前那段），再 join。
+# ⚠️ 关键：tool_result 型的 user 行要跳过、不能当边界——工具返回是 user 类型，若在它那儿
+# 停下，就只收到工具之后的文字、工具前的被吞（这正是 Bug1）。
+# Linux 没 tail -r 用 tac
+REVERSE_CAT="tail -r"
+if ! command -v tail >/dev/null 2>&1 || ! tail -r /dev/null 2>/dev/null; then
+    REVERSE_CAT="tac"
+fi
+LAST_ASSISTANT=$($REVERSE_CAT "$TRANSCRIPT_PATH" | python3 -c '
 import json, sys
+
+def is_tool_result_user(obj):
+    c = (obj.get("message") or {}).get("content")
+    return isinstance(c, list) and any(
+        isinstance(x, dict) and x.get("type") == "tool_result" for x in c)
+
 collected = []
 for line in sys.stdin:
     line = line.strip()
@@ -130,7 +136,9 @@ for line in sys.stdin:
         continue
     t = obj.get("type")
     if t == "user":
-        break
+        if is_tool_result_user(obj):
+            continue   # 工具返回，不是真用户边界，跳过继续往前收
+        break          # 真用户消息 = 这一轮起点，停
     if t == "assistant":
         msg = obj.get("message", {})
         content = msg.get("content", [])
@@ -144,6 +152,13 @@ for line in sys.stdin:
 collected.reverse()
 print("\n\n".join(collected))
 ' 2>/dev/null)
+
+# 兜底：transcript 还没刷出来导致空 → 退回 stdin 的 last_assistant_message（至少有工具后那段）
+if [ -z "$LAST_ASSISTANT" ] && [ -n "$DIRECT_LAST" ]; then
+    LAST_ASSISTANT="$DIRECT_LAST"
+    log "transcript empty, fell back to stdin last_assistant_message (chars=${#LAST_ASSISTANT})"
+else
+    log "collected assistant text from transcript (chars=${#LAST_ASSISTANT})"
 fi
 
 if [ -z "$LAST_ASSISTANT" ]; then
