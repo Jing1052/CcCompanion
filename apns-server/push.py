@@ -298,6 +298,8 @@ class ServerState:
         tg_cfg = config.get("telegram", {}) or {}
         self.tg_cc_bot_token: str = str(tg_cfg.get("cc_bot_token", "") or "").strip()
         self.tg_cc_chat_id: str = str(tg_cfg.get("cc_chat_id", "") or "").strip()
+        # Telegram 国内要代理；配了就让轮询器走它（不再依赖启动时的 env 前缀）。
+        self.tg_proxy: str = str(tg_cfg.get("proxy", "") or "").strip()
         self.tg_poll_interval: float = float(tg_cfg.get("poll_interval", 2) or 2)
         self.tg_offset_path = (
             Path(self.token_store_path).expanduser().parent / "tg_poller_offset.json"

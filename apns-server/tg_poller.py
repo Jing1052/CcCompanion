@@ -27,14 +27,27 @@ logger = logging.getLogger("cc-apns-server")
 _API = "https://api.telegram.org/bot{token}/{method}"
 
 
-def _tg_get_updates(token: str, offset: int, timeout: int = 25):
+def _opener_for(proxy: str):
+    """proxy 非空 → 走该代理（Telegram 国内要代理）；空 → 跟随环境/直连。"""
+    if proxy:
+        return urllib.request.build_opener(
+            urllib.request.ProxyHandler({"http": proxy, "https": proxy})
+        )
+    return urllib.request.build_opener()
+
+
+# 本机 /chat/send 永远直连，绕过任何代理（含环境里的）。
+_LOCAL_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+
+def _tg_get_updates(token: str, offset: int, proxy: str = "", timeout: int = 25):
     """长轮询 getUpdates。返回 (updates_list, conflict_bool)。出错回 ([], False)。"""
     url = _API.format(token=token, method="getUpdates") + "?" + urllib.parse.urlencode(
         {"offset": offset, "timeout": timeout, "allowed_updates": json.dumps(["message"])}
     )
     try:
-        # socket 超时给长轮询留足余量
-        with urllib.request.urlopen(url, timeout=timeout + 10) as resp:
+        # socket 超时给长轮询留足余量；走配置的代理
+        with _opener_for(proxy).open(url, timeout=timeout + 10) as resp:
             data = json.loads(resp.read().decode("utf-8", "ignore"))
     except urllib.error.HTTPError as e:
         body = ""
@@ -66,7 +79,7 @@ def _inject_via_chat_send(state, text: str) -> bool:
     if state.shared_secret:
         req.add_header("X-Auth-Token", state.shared_secret)
     try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
+        with _LOCAL_OPENER.open(req, timeout=15) as resp:  # 本机直连，别走代理
             return 200 <= resp.status < 300
     except urllib.error.HTTPError as e:
         logger.warning("[tg_poller] /chat/send HTTP %s", e.code)
@@ -101,13 +114,15 @@ def tg_poller_loop(state):
         return
     allow_chat = str(getattr(state, "tg_cc_chat_id", "") or "").strip()
     interval = float(getattr(state, "tg_poll_interval", 2) or 2)
+    proxy = (getattr(state, "tg_proxy", "") or "").strip()
     offset_path = state.tg_offset_path
     offset = _load_offset(offset_path)
-    logger.info("[tg_poller] starting (chat_id allowlist=%s, offset=%d)", allow_chat or "(none)", offset)
+    logger.info("[tg_poller] starting (chat_id allowlist=%s, proxy=%s, offset=%d)",
+                allow_chat or "(none)", proxy or "(env/none)", offset)
 
     while True:
         try:
-            updates, conflict = _tg_get_updates(token, offset)
+            updates, conflict = _tg_get_updates(token, offset, proxy)
             if conflict:
                 time.sleep(15)  # webhook/插件冲突，退避久一点别刷屏
                 continue
@@ -123,7 +138,8 @@ def tg_poller_loop(state):
                 if allow_chat and chat_id != allow_chat:
                     logger.info("[tg_poller] 丢弃非白名单 chat_id=%s 的消息", chat_id)
                     continue
-                if _inject_via_chat_send(state, text):
+                # [TG] 前缀：让 CC 认出这条来自 TG、该用 tg 脚本回 TG，而不是只回终端。
+                if _inject_via_chat_send(state, "[TG] " + text):
                     logger.info("[tg_poller] 注入 TG 消息 update_id=%s", uid)
                 else:
                     logger.warning("[tg_poller] 注入失败 update_id=%s（保留 offset 下轮重试）", uid)
