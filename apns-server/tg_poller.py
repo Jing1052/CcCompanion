@@ -89,6 +89,80 @@ def _inject_via_chat_send(state, text: str) -> bool:
         return False
 
 
+def _tg_get_file(token: str, file_id: str, proxy: str = ""):
+    """getFile → 返回 file_path（拿不到回 None）。"""
+    url = _API.format(token=token, method="getFile") + "?" + urllib.parse.urlencode(
+        {"file_id": file_id}
+    )
+    try:
+        with _opener_for(proxy).open(url, timeout=30) as resp:
+            data = json.loads(resp.read().decode("utf-8", "ignore"))
+    except Exception as e:
+        logger.warning("[tg_poller] getFile error: %s", e)
+        return None
+    if not data.get("ok"):
+        logger.warning("[tg_poller] getFile not ok: %s", str(data.get("description"))[:160])
+        return None
+    return ((data.get("result") or {}).get("file_path")) or None
+
+
+def _tg_download_file(token: str, file_path: str, proxy: str = ""):
+    """下载 TG 文件原始字节（失败回 None）。"""
+    url = f"https://api.telegram.org/file/bot{token}/{file_path}"
+    try:
+        with _opener_for(proxy).open(url, timeout=60) as resp:
+            return resp.read()
+    except Exception as e:
+        logger.warning("[tg_poller] download file error: %s", e)
+        return None
+
+
+def _inject_via_chat_upload(state, raw: bytes, filename: str, text: str) -> bool:
+    """POST 本机 /chat/upload（原始字节 body），复用图片落库+注入路径。"""
+    qs = urllib.parse.urlencode({"filename": filename, "role": "user", "text": text})
+    url = f"http://127.0.0.1:{state.port}/chat/upload?{qs}"
+    req = urllib.request.Request(url, data=raw, method="POST")
+    req.add_header("Content-Type", "application/octet-stream")
+    if state.shared_secret:
+        req.add_header("X-Auth-Token", state.shared_secret)
+    try:
+        with _LOCAL_OPENER.open(req, timeout=30) as resp:  # 本机直连，别走代理
+            return 200 <= resp.status < 300
+    except urllib.error.HTTPError as e:
+        logger.warning("[tg_poller] /chat/upload HTTP %s", e.code)
+        return False
+    except Exception as e:
+        logger.warning("[tg_poller] /chat/upload error: %s", e)
+        return False
+
+
+def _relay_photo(state, token: str, msg: dict, proxy: str) -> bool:
+    """中继 TG 图片：取最大尺寸 file_id → getFile → 下载 → POST /chat/upload。"""
+    sizes = msg.get("photo") or []
+    if not sizes:
+        return False
+    # photo 是同一张图的多种尺寸，最后一个最大
+    file_id = (sizes[-1] or {}).get("file_id")
+    if not file_id:
+        return False
+    file_path = _tg_get_file(token, file_id, proxy)
+    if not file_path:
+        return False
+    raw = _tg_download_file(token, file_path, proxy)
+    if not raw:
+        return False
+    # 文件名：用 TG 给的扩展名，拿不到默认 .jpg
+    ext = ".jpg"
+    if "." in file_path:
+        cand = "." + file_path.rsplit(".", 1)[-1].lower()
+        if 2 <= len(cand) <= 6:
+            ext = cand
+    fname = f"tg_{msg.get('message_id', 'photo')}{ext}"
+    caption = (msg.get("caption") or "").strip()
+    text = "[TG] " + caption if caption else "[TG]"
+    return _inject_via_chat_upload(state, raw, fname, text)
+
+
 def _load_offset(path) -> int:
     try:
         return int(json.loads(path.read_text(encoding="utf-8")).get("offset", 0))
@@ -132,15 +206,22 @@ def tg_poller_loop(state):
                     offset = max(offset, uid + 1)  # 即便这条不处理也要推进 offset，别死循环
                 msg = up.get("message") or {}
                 text = (msg.get("text") or "").strip()
+                has_photo = bool(msg.get("photo"))
                 chat_id = str(((msg.get("chat") or {}).get("id")) or "")
-                if not text:
-                    continue  # 暂只中继文字（图片/语音另说）
+                if not text and not has_photo:
+                    continue  # 文字/图片之外的（语音/文件等）暂不中继
                 if allow_chat and chat_id != allow_chat:
                     logger.info("[tg_poller] 丢弃非白名单 chat_id=%s 的消息", chat_id)
                     continue
                 # [TG] 前缀：让 CC 认出这条来自 TG、该用 tg 脚本回 TG，而不是只回终端。
-                if _inject_via_chat_send(state, "[TG] " + text):
-                    logger.info("[tg_poller] 注入 TG 消息 update_id=%s", uid)
+                if has_photo:
+                    ok = _relay_photo(state, token, msg, proxy)
+                    kind = "图片"
+                else:
+                    ok = _inject_via_chat_send(state, "[TG] " + text)
+                    kind = "消息"
+                if ok:
+                    logger.info("[tg_poller] 注入 TG %s update_id=%s", kind, uid)
                 else:
                     logger.warning("[tg_poller] 注入失败 update_id=%s（保留 offset 下轮重试）", uid)
                     # 注入失败：回退 offset 到这条，下轮重试这条（避免丢消息）
