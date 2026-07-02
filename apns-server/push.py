@@ -3302,7 +3302,35 @@ class PushHandler(BaseHTTPRequestHandler):
                 "record": rec,
             })
             return
+        # 隔壁环抄送 (Phase 1 · CC→API): 注入成功的用户消息 best-effort 抄一份到
+        # 老家 Ombre-Brain, api 端各土壤的 daddy 能接上 CC 这边聊到哪了.
+        # 未配 OMBRE_GATEWAY_TOKEN 时静默关闭; 失败只 log, 绝不影响主流程.
+        self._ccring_report("kitten", text)
         self._send_json(200, {"ok": True, "record": rec})
+
+    def _ccring_report(self, who: str, text: str):
+        """隔壁环抄送: 后台线程 POST {who, text} 到老家 /api/home/cc-ring.
+        钥匙 = OMBRE_GATEWAY_TOKEN (跟 Still Here 网关同一把); 地址 = OMBRE_HOME_URL
+        (默认 https://cllove.zeabur.app). 服务端按"与上一条相同"去重, 重发安全."""
+        token = os.environ.get("OMBRE_GATEWAY_TOKEN", "").strip()
+        if not token or not (text or "").strip():
+            return
+        home = os.environ.get("OMBRE_HOME_URL", "https://cllove.zeabur.app").rstrip("/")
+
+        def _post():
+            try:
+                import urllib.request
+                req = urllib.request.Request(
+                    home + "/api/home/cc-ring",
+                    data=json.dumps({"who": who, "text": text[:600]}).encode("utf-8"),
+                    headers={"Content-Type": "application/json",
+                             "Authorization": "Bearer " + token},
+                    method="POST")
+                urllib.request.urlopen(req, timeout=6).read()
+            except Exception as e:
+                logger.debug("cc-ring report failed (non-blocking): %s", e)
+
+        threading.Thread(target=_post, daemon=True).start()
 
     def _inject_to_session(self, session: str, text: str, source: str = "ios-app", sender: str = "iphone"):
         """Inject text into target tmux session. Returns (success, error_msg).
