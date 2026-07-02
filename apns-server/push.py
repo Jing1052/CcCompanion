@@ -46,10 +46,34 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
+import io
+from PIL import Image
+
 from jwt_helper import APNsJWT
 from apns_client import APNsClient, APNsResponse
 from token_store import TokenStore
 from device_token_store import DeviceTokenStore
+
+
+def _compress_upload_image(raw: bytes, max_dim: int = 1024, quality: int = 80) -> bytes:
+    """缩放上传图片到 max_dim 以内，省 Claude 视觉 token。"""
+    try:
+        img = Image.open(io.BytesIO(raw))
+        if img.mode in ("RGBA", "P"):
+            img = img.convert("RGB")
+        w, h = img.size
+        if max(w, h) > max_dim:
+            ratio = max_dim / max(w, h)
+            img = img.resize((int(w * ratio), int(h * ratio)), Image.LANCZOS)
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=quality, optimize=True)
+        result = buf.getvalue()
+        logger.info("[upload] image compressed: %dKB → %dKB (%dx%d)",
+                    len(raw) // 1024, len(result) // 1024, img.size[0], img.size[1])
+        return result
+    except Exception as e:
+        logger.warning("[upload] image compress failed: %s, using original", e)
+        return raw
 from task_queue import TaskQueue
 from chat_history import ChatHistory, EphemeralTaskBuffer
 from diary_stream import DiaryStream
@@ -3954,14 +3978,23 @@ class PushHandler(BaseHTTPRequestHandler):
         stored_path = self.state.attachments_dir / stored_name
 
         try:
+            raw_bytes = bytearray()
+            remaining = length
+            while remaining > 0:
+                chunk = self.rfile.read(min(remaining, 65536))
+                if not chunk:
+                    break
+                raw_bytes.extend(chunk)
+                remaining -= len(chunk)
+
+            data = bytes(raw_bytes)
+            if atype == "image":
+                data = _compress_upload_image(data)
+                stored_name = f"{_uuid.uuid4().hex}.jpg"
+                stored_path = self.state.attachments_dir / stored_name
+
             with stored_path.open("wb") as f:
-                remaining = length
-                while remaining > 0:
-                    chunk = self.rfile.read(min(remaining, 65536))
-                    if not chunk:
-                        break
-                    f.write(chunk)
-                    remaining -= len(chunk)
+                f.write(data)
         except Exception as e:
             logger.exception("upload write fail")
             self._send_json(500, {"error": f"write fail: {e}"})

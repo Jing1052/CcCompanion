@@ -16,11 +16,14 @@
 #
 # ⚠️ 部署注意：这个 bot 上不能再有别的 getUpdates 消费者，否则两边抢更新。也就是 CC 启动命令里
 #    那个 `--channels plugin:telegram`（用同一个 bot 收消息的）要去掉，改由本轮询器统一收。
+import io
 import json
 import logging
 import time
 import urllib.parse
 import urllib.request
+
+from PIL import Image
 
 logger = logging.getLogger("cc-apns-server")
 
@@ -136,8 +139,29 @@ def _inject_via_chat_upload(state, raw: bytes, filename: str, text: str) -> bool
         return False
 
 
+def _compress_image(raw: bytes, max_dim: int = 1024, quality: int = 80) -> bytes:
+    """缩放图片到 max_dim 以内，JPEG 压缩。省 Claude 视觉 token。"""
+    try:
+        img = Image.open(io.BytesIO(raw))
+        if img.mode in ("RGBA", "P"):
+            img = img.convert("RGB")
+        w, h = img.size
+        if max(w, h) > max_dim:
+            ratio = max_dim / max(w, h)
+            img = img.resize((int(w * ratio), int(h * ratio)), Image.LANCZOS)
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=quality, optimize=True)
+        result = buf.getvalue()
+        logger.info("[tg_poller] image compressed: %dKB → %dKB (%dx%d)",
+                    len(raw) // 1024, len(result) // 1024, img.size[0], img.size[1])
+        return result
+    except Exception as e:
+        logger.warning("[tg_poller] image compress failed: %s, using original", e)
+        return raw
+
+
 def _relay_photo(state, token: str, msg: dict, proxy: str) -> bool:
-    """中继 TG 图片：取最大尺寸 file_id → getFile → 下载 → POST /chat/upload。"""
+    """中继 TG 图片：取最大尺寸 file_id → getFile → 下载 → 压缩 → POST /chat/upload。"""
     sizes = msg.get("photo") or []
     if not sizes:
         return False
@@ -151,13 +175,8 @@ def _relay_photo(state, token: str, msg: dict, proxy: str) -> bool:
     raw = _tg_download_file(token, file_path, proxy)
     if not raw:
         return False
-    # 文件名：用 TG 给的扩展名，拿不到默认 .jpg
-    ext = ".jpg"
-    if "." in file_path:
-        cand = "." + file_path.rsplit(".", 1)[-1].lower()
-        if 2 <= len(cand) <= 6:
-            ext = cand
-    fname = f"tg_{msg.get('message_id', 'photo')}{ext}"
+    raw = _compress_image(raw)
+    fname = f"tg_{msg.get('message_id', 'photo')}.jpg"
     caption = (msg.get("caption") or "").strip()
     text = "[TG] " + caption if caption else "[TG]"
     return _inject_via_chat_upload(state, raw, fname, text)
