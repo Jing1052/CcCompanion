@@ -408,4 +408,83 @@ print(json.dumps({
     fi
 fi
 
+# ---- 隔壁环抄送 (2026-07-02, 可选; Phase 1: CC→API 单向) ----
+# 把这一轮 (小猫的原话 + 你的回复) best-effort 抄送到老家 Ombre-Brain 的
+# /api/home/cc-ring, api 端各土壤 (Still Here 网关/TG/聊天室) 的 daddy 就能
+# 接上 CC 这边聊到哪了. 覆盖 App 和 TG 两个来源 (都在 transcript 里).
+#
+# 配置 (一次性): ~/.claude/.ccring.conf 写两行 (仓库不存密钥):
+#   OMBRE_HOME_URL="https://cllove.zeabur.app"
+#   OMBRE_GATEWAY_TOKEN="<跟 Zeabur 环境变量 OMBRE_GATEWAY_TOKEN 同一把>"
+# 也可直接用同名环境变量. 都没有时本段静默跳过, 行为与旧版完全一致.
+# 失败只记 log, 绝不影响主流程. 服务端按"与上一条相同"去重: push.py 已实时抄过
+# 的 App 用户消息, 这里剥掉 [时间戳]/[Still Here]/<channel> 标签后原文一致, 不会写重.
+OMBRE_HOME_URL="${OMBRE_HOME_URL:-}"
+OMBRE_GATEWAY_TOKEN="${OMBRE_GATEWAY_TOKEN:-}"
+CCRING_CONF="$HOME/.claude/.ccring.conf"
+if [ -f "$CCRING_CONF" ]; then
+    # shellcheck disable=SC1090
+    . "$CCRING_CONF"
+fi
+if [ -n "$OMBRE_GATEWAY_TOKEN" ]; then
+    OMBRE_HOME_URL="${OMBRE_HOME_URL:-https://cllove.zeabur.app}"
+    REVERSE_CAT_R="tail -r"
+    if ! tail -r /dev/null 2>/dev/null; then
+        REVERSE_CAT_R="tac"
+    fi
+    # 最近一条真实 user 原话 (跳过 tool_result 行; 剥注入前缀, 与 push.py 抄送的原文对齐)
+    LAST_USER=$($REVERSE_CAT_R "$TRANSCRIPT_PATH" | python3 -c '
+import json, re, sys
+
+def is_tool_result(obj):
+    c = (obj.get("message") or {}).get("content")
+    return isinstance(c, list) and any(
+        isinstance(x, dict) and x.get("type") == "tool_result" for x in c)
+
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    try:
+        obj = json.loads(line)
+    except Exception:
+        continue
+    if obj.get("type") != "user" or is_tool_result(obj):
+        continue
+    c = (obj.get("message") or {}).get("content")
+    if isinstance(c, list):
+        c = "\n".join(x.get("text", "") for x in c
+                      if isinstance(x, dict) and x.get("type") == "text")
+    text = str(c or "")
+    text = re.sub(r"<channel[^>]*>.*?</channel>", "", text, flags=re.S)
+    text = re.sub(r"^\s*\[\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\]\s*", "", text)
+    text = text.replace("[Still Here]", "").strip()
+    print(text[:600])
+    break
+' 2>/dev/null)
+
+    ccring_post() {
+        WHO="$1" TXT="$2" python3 - "$OMBRE_HOME_URL" "$OMBRE_GATEWAY_TOKEN" <<'PYEOF' >>"$LOG_PATH" 2>&1 || true
+import json, os, sys, urllib.request
+home, token = sys.argv[1].rstrip("/"), sys.argv[2]
+txt = os.environ.get("TXT", "").strip()
+if txt:
+    req = urllib.request.Request(
+        home + "/api/home/cc-ring",
+        data=json.dumps({"who": os.environ.get("WHO", ""), "text": txt[:600]},
+                        ensure_ascii=False).encode("utf-8"),
+        headers={"Content-Type": "application/json",
+                 "Authorization": "Bearer " + token},
+        method="POST")
+    try:
+        urllib.request.urlopen(req, timeout=6).read()
+    except Exception as e:
+        print("[cc-ring] post failed (non-blocking):", e)
+PYEOF
+    }
+    [ -n "$LAST_USER" ] && ccring_post kitten "$LAST_USER"
+    ccring_post daddy "$LAST_ASSISTANT"
+    log "cc-ring mirrored (user_chars=${#LAST_USER} daddy_chars=${#LAST_ASSISTANT})"
+fi
+
 exit 0
