@@ -182,6 +182,28 @@ def _relay_photo(state, token: str, msg: dict, proxy: str) -> bool:
     return _inject_via_chat_upload(state, raw, fname, text)
 
 
+def _relay_voice(state, token: str, msg: dict, proxy: str) -> bool:
+    """中继 TG 语音/音频：file_id → getFile → 下载 → POST /chat/upload。
+    注入的 hint 自带本地路径，CC 端用 transcribe.py 转写后当她亲口说的话。"""
+    voice = msg.get("voice") or msg.get("audio") or {}
+    file_id = voice.get("file_id")
+    if not file_id:
+        return False
+    file_path = _tg_get_file(token, file_id, proxy)
+    if not file_path:
+        return False
+    raw = _tg_download_file(token, file_path, proxy)
+    if not raw:
+        return False
+    ext = "." + file_path.rsplit(".", 1)[-1] if "." in file_path else ".oga"
+    fname = "tg_{}{}".format(msg.get("message_id", "voice"), ext)
+    caption = (msg.get("caption") or "").strip()
+    text = "[TG] (小猫发来语音消息——先用 python3 ~/.claude/tools/transcribe.py 转写下面本地路径的文件，把转写内容当她亲口说的话来回)"
+    if caption:
+        text += " " + caption
+    return _inject_via_chat_upload(state, raw, fname, text)
+
+
 def _load_offset(path) -> int:
     try:
         return int(json.loads(path.read_text(encoding="utf-8")).get("offset", 0))
@@ -226,9 +248,10 @@ def tg_poller_loop(state):
                 msg = up.get("message") or {}
                 text = (msg.get("text") or "").strip()
                 has_photo = bool(msg.get("photo"))
+                has_voice = bool(msg.get("voice") or msg.get("audio"))
                 chat_id = str(((msg.get("chat") or {}).get("id")) or "")
-                if not text and not has_photo:
-                    continue  # 文字/图片之外的（语音/文件等）暂不中继
+                if not text and not has_photo and not has_voice:
+                    continue  # 文字/图片/语音之外的（视频/文件等）暂不中继
                 if allow_chat and chat_id != allow_chat:
                     logger.info("[tg_poller] 丢弃非白名单 chat_id=%s 的消息", chat_id)
                     continue
@@ -236,6 +259,9 @@ def tg_poller_loop(state):
                 if has_photo:
                     ok = _relay_photo(state, token, msg, proxy)
                     kind = "图片"
+                elif has_voice:
+                    ok = _relay_voice(state, token, msg, proxy)
+                    kind = "语音"
                 else:
                     ok = _inject_via_chat_send(state, "[TG] " + text)
                     kind = "消息"
