@@ -178,7 +178,9 @@ def _relay_photo(state, token: str, msg: dict, proxy: str) -> bool:
     raw = _compress_image(raw)
     fname = f"tg_{msg.get('message_id', 'photo')}.jpg"
     caption = (msg.get("caption") or "").strip()
-    text = "[TG] " + caption if caption else "[TG]"
+    mid = msg.get("message_id")
+    tag = "[TG#{}]".format(mid) if mid else "[TG]"
+    text = tag + " " + caption if caption else tag
     return _inject_via_chat_upload(state, raw, fname, text)
 
 
@@ -198,7 +200,9 @@ def _relay_voice(state, token: str, msg: dict, proxy: str) -> bool:
     ext = "." + file_path.rsplit(".", 1)[-1] if "." in file_path else ".oga"
     fname = "tg_{}{}".format(msg.get("message_id", "voice"), ext)
     caption = (msg.get("caption") or "").strip()
-    text = "[TG] (小猫发来语音消息——先用 python3 ~/.claude/tools/transcribe.py 转写下面本地路径的文件，把转写内容当她亲口说的话来回)"
+    mid = msg.get("message_id")
+    tag = "[TG#{}]".format(mid) if mid else "[TG]"
+    text = tag + " (小猫发来语音消息——先用 python3 ~/.claude/tools/transcribe.py 转写下面本地路径的文件，把转写内容当她亲口说的话来回)"
     if caption:
         text += " " + caption
     return _inject_via_chat_upload(state, raw, fname, text)
@@ -263,7 +267,9 @@ def tg_poller_loop(state):
                     ok = _relay_voice(state, token, msg, proxy)
                     kind = "语音"
                 else:
-                    ok = _inject_via_chat_send(state, "[TG] " + text)
+                    mid = msg.get("message_id")
+                    tag = "[TG#{}] ".format(mid) if mid else "[TG] "
+                    ok = _inject_via_chat_send(state, tag + text)
                     kind = "消息"
                 if ok:
                     logger.info("[tg_poller] 注入 TG %s update_id=%s", kind, uid)
