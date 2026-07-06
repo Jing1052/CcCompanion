@@ -128,6 +128,20 @@ def _load_agents_config() -> None:
         except Exception:
             pass
 
+    # Ensure every roster agent is addressable by its own id / display_name even
+    # when the deployment supplied its own mention_aliases (which fully REPLACES
+    # the in-code default table) and forgot to list the agent. setdefault → any
+    # explicit user alias still wins. Root-causes the "hand-wrote an agent into
+    # `agents` but @<name> never routes" footgun — e.g. @codex silently dropping.
+    for m in ROSTER:
+        aid = m.get("id")
+        if not aid:
+            continue
+        MENTION_ALIASES.setdefault(str(aid).lower(), aid)
+        dn = str(m.get("display_name") or "").strip().lower()
+        if dn:
+            MENTION_ALIASES.setdefault(dn, aid)
+
     ROSTER_BY_ID = {m["id"]: m for m in ROSTER}
     REPLY_AGENT_IDS = [m["id"] for m in ROSTER if m.get("can_reply")]
 
@@ -168,6 +182,7 @@ MENTION_ALIASES = {
     "agent-c": "shu",
     "c": "shu",
     "shu": "shu",
+    "codex": "shu",
     "agent-d": "opus47_fresh",
     "d": "opus47_fresh",
     "opus47_fresh": "opus47_fresh",

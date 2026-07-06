@@ -59,6 +59,7 @@
     "assistant": "opia",
     "ai": "opia",
     "agent-b": "sonnet",
-    "agent-c": "shu"
+    "agent-c": "shu",
+    "codex": "shu"
   }
 }

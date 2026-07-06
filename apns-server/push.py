@@ -2477,7 +2477,12 @@ class PushHandler(BaseHTTPRequestHandler):
             dispatch_id=dispatch_id,
         )
 
-        self._send_json(200, {"ok": True, "record": rec, "targets": targets})
+        # `mentions` = resolved agent ids; `targets` = who actually got dispatched.
+        # Diffing the two disambiguates the two silent-failure modes when a message
+        # doesn't reach an agent: mentions empty → alias未配 (e.g. @codex 没进
+        # mention_aliases); mentions non-empty but missing from targets → that agent
+        # was gated out as offline (tmux session name mismatch or pane dead).
+        self._send_json(200, {"ok": True, "record": rec, "targets": targets, "mentions": mentions})
 
     def _handle_group_append(self, body: dict[str, Any]):
         text = str(body.get("text") or "").strip()
@@ -2540,7 +2545,12 @@ class PushHandler(BaseHTTPRequestHandler):
             parent_msg_id=body.get("parent_msg_id"),
             hop_count=hop_count,
         )
-        self._send_json(200, {"ok": True, "record": rec, "targets": targets})
+        # `mentions` = resolved agent ids; `targets` = who actually got dispatched.
+        # Diffing the two disambiguates the two silent-failure modes when a message
+        # doesn't reach an agent: mentions empty → alias未配 (e.g. @codex 没进
+        # mention_aliases); mentions non-empty but missing from targets → that agent
+        # was gated out as offline (tmux session name mismatch or pane dead).
+        self._send_json(200, {"ok": True, "record": rec, "targets": targets, "mentions": mentions})
 
     def _group_fan_out(
         self,
@@ -4109,7 +4119,12 @@ class PushHandler(BaseHTTPRequestHandler):
             dispatch_id=dispatch_id,
         )
 
-        self._send_json(200, {"ok": True, "record": rec, "targets": targets})
+        # `mentions` = resolved agent ids; `targets` = who actually got dispatched.
+        # Diffing the two disambiguates the two silent-failure modes when a message
+        # doesn't reach an agent: mentions empty → alias未配 (e.g. @codex 没进
+        # mention_aliases); mentions non-empty but missing from targets → that agent
+        # was gated out as offline (tmux session name mismatch or pane dead).
+        self._send_json(200, {"ok": True, "record": rec, "targets": targets, "mentions": normalized_mentions})
 
     def _handle_attachment_get(self):
         """静态服务 attachment 文件 — GET /attachments/<filename>"""
