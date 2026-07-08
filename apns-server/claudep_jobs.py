@@ -73,6 +73,17 @@ def _run(job, cmd, env):
             if t == "result":
                 if j.get("result"):
                     result_text = str(j.get("result"))
+                # result 事件自带整次调用的 usage（含缓存读写）——发给网关记账，
+                # 监控台的 claude-p 调用/token/缓存命中全靠这一条。网关（2026-07-08 起）
+                # 认 "usage" 事件；只发标准四键，别整个 usage 透传（里面还有 server_tool_use 等杂项）。
+                u = j.get("usage")
+                if isinstance(u, dict):
+                    job["events"].append(["usage", {
+                        "input_tokens": u.get("input_tokens") or 0,
+                        "output_tokens": u.get("output_tokens") or 0,
+                        "cache_read_input_tokens": u.get("cache_read_input_tokens") or 0,
+                        "cache_creation_input_tokens": u.get("cache_creation_input_tokens") or 0,
+                    }])
                 continue
             if t != "stream_event":
                 continue
