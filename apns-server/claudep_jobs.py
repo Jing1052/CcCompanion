@@ -62,6 +62,13 @@ def _msgs_hash(messages):
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+def _miss(why):
+    # 每个退回全量的口都点名（2026-07-09 加）：真实 App 流量下 resume 命中率
+    # 只能靠这行破案，别删。stdout 经 tee 落 /tmp/apns.log。
+    print("[claudep-resume] miss: " + why, flush=True)
+    return None
+
+
 def _resume_plan(messages, model, chat_key):
     """能安全 --resume 就返回 (session_id, [新增的 user 消息们])，否则 None。
 
@@ -71,22 +78,27 @@ def _resume_plan(messages, model, chat_key):
     - 紧接着一条 assistant（session 自己上轮的回复回声），其后全是 user 纯文本。
     """
     if not chat_key:
-        return None
+        return _miss("no chat_key")
     with _LOCK:
         ent = _CHATS.get(chat_key)
-    if not ent or ent.get("model") != model:
-        return None
+    if not ent:
+        return _miss("no mapping for chat_key=%s (重启后首条?)" % chat_key[:24])
+    if ent.get("model") != model:
+        return _miss("model changed: %s -> %s" % (ent.get("model"), model))
     n = ent["msg_len"]
     if len(messages) < n + 2:
-        return None
+        return _miss("too few messages: len=%d need>=%d" % (len(messages), n + 2))
     if _msgs_hash(messages[:n]) != ent["msg_hash"]:
-        return None
+        return _miss("prefix hash mismatch: n=%d len=%d (窗口滑动/编辑/历史被改写/剥离残渣)"
+                     % (n, len(messages)))
     if (messages[n] or {}).get("role") != "assistant":
-        return None
+        return _miss("messages[%d] role=%s not assistant" % (n, (messages[n] or {}).get("role")))
     tail = messages[n + 1:]
     if not all((m or {}).get("role") == "user" and isinstance(m.get("content"), str)
                for m in tail):
-        return None
+        return _miss("tail not all plain-text user (multimodal/结构异常)")
+    print("[claudep-resume] hit: sid=%s tail=%d" % (ent["session_id"][:12], len(tail)),
+          flush=True)
     return ent["session_id"], [m["content"] for m in tail]
 
 
@@ -104,6 +116,8 @@ def _chats_store(chat_key, session_id, messages, model):
         }
         while len(_CHATS) > _CHATS_CAP:
             _CHATS.pop(min(_CHATS, key=lambda k: _CHATS[k]["ts"]), None)
+    print("[claudep-resume] store: chat_key=%s sid=%s msg_len=%d"
+          % (chat_key[:24], session_id[:12], len(clean)), flush=True)
 
 
 def _gc():
