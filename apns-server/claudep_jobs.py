@@ -113,12 +113,16 @@ def _gc():
             _JOBS.pop(k, None)
 
 
-def _run(job, cmd, env, fallback_cmd=None):
+def _run(job, cmd, env, prompt, fallback=None):
     """后台线程跑 claude -p，把 thinking/text 增量按序攒进 job["events"]。
     解析逻辑与 claudep_ext.handle_claudep 流式分支同源：stream_event 增量优先，
     assistant 块的 thinking / result 文本做兜底。
-    fallback_cmd：--resume 路专用的后备——session 失踪等原因一字未出就败了，
-    静默改跑全量命令，网关和 App 无感知。"""
+    prompt 走 stdin 不走 argv（2026-07-09 亲踩）：全量历史拼成的 prompt 会超过
+    Linux 单个 argv 字符串上限 MAX_ARG_STRLEN=128KiB，execve 直接 E2BIG
+    （spawn failed: [Errno 7] Argument list too long）。claude -p 不带位置参数
+    时从 stdin 读 prompt，长度不受限。
+    fallback：--resume 路专用的后备 (cmd, prompt)——session 失踪等原因一字未出
+    就败了，静默改跑全量命令，网关和 App 无感知。"""
     got_any = False
     got_think = False
     full_text = ""
@@ -127,12 +131,23 @@ def _run(job, cmd, env, fallback_cmd=None):
     auth_err = None
     try:
         proc = subprocess.Popen(cmd, cwd=claudep_ext._CWD, env=env,
-                                stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                 stderr=subprocess.DEVNULL, text=True, bufsize=1)
     except Exception as e:
         job["error"] = "spawn failed: " + str(e)[:200]
         job["done"] = True
         return
+
+    def _feed():
+        # 独立线程灌 stdin：prompt 超过管道缓冲(64KB)时 write 会阻塞到子进程
+        # 消费为止，放主读取循环里有对锁死的风险
+        try:
+            proc.stdin.write(prompt)
+            proc.stdin.close()
+        except Exception:
+            pass
+
+    threading.Thread(target=_feed, daemon=True).start()
     start = time.time()
     try:
         for line in proc.stdout:
@@ -195,7 +210,7 @@ def _run(job, cmd, env, fallback_cmd=None):
             proc.terminate()
         except Exception:
             pass
-    if fallback_cmd and not job["error"] and not got_any and not full_text:
+    if fallback and not job["error"] and not got_any and not full_text:
         # resume 一字未出就败了（session 失踪/损坏等）——丢掉映射、改跑全量。
         # 超时（job["error"]已置）不重跑：网关 600s 就放弃了，再跑一轮只是白烧
         st = job.get("_store")
@@ -203,7 +218,7 @@ def _run(job, cmd, env, fallback_cmd=None):
             with _LOCK:
                 _CHATS.pop(st["chat_key"], None)
         job["events"] = []
-        _run(job, fallback_cmd, env)
+        _run(job, fallback[0], env, fallback[1])
         return
     if not got_think and full_think:
         job["events"].append(["reasoning", full_think])
@@ -242,7 +257,9 @@ def handle_submit(h, body):
         return
     full_prompt += _THINK_NUDGE
 
-    def _cmd(prompt, resume_sid=None):
+    def _cmd(resume_sid=None):
+        # prompt 不进 argv（走 stdin，见 _run 注释）；system 仍走 argv——魂文档
+        # 几十 KB 量级，离 128KiB 单参数上限还远
         c = [
             claudep_ext._CLAUDE_BIN, "-p",
             "--output-format", "stream-json",
@@ -253,17 +270,17 @@ def handle_submit(h, body):
         ]
         if resume_sid:
             c += ["--resume", resume_sid]
-        c += ["--append-system-prompt", system, prompt]
+        c += ["--append-system-prompt", system]
         return c
 
     plan = _resume_plan(messages, model, chat_key)
     if plan:
         sid, tail = plan
-        cmd = _cmd("\n\n".join(tail) + _THINK_NUDGE, resume_sid=sid)
-        fallback_cmd = _cmd(full_prompt)
+        cmd, prompt = _cmd(resume_sid=sid), "\n\n".join(tail) + _THINK_NUDGE
+        fallback = (_cmd(), full_prompt)
     else:
-        cmd = _cmd(full_prompt)
-        fallback_cmd = None
+        cmd, prompt = _cmd(), full_prompt
+        fallback = None
     try:
         import os as _os
         _os.makedirs(claudep_ext._CWD, exist_ok=True)
@@ -277,7 +294,7 @@ def handle_submit(h, body):
         job["_store"] = {"chat_key": chat_key, "messages": messages, "model": model}
     with _LOCK:
         _JOBS[jid] = job
-    threading.Thread(target=_run, args=(job, cmd, env, fallback_cmd), daemon=True).start()
+    threading.Thread(target=_run, args=(job, cmd, env, prompt, fallback), daemon=True).start()
     h._send_json(200, {"ok": True, "job_id": jid})
 
 
