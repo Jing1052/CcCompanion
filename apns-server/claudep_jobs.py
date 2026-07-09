@@ -32,10 +32,12 @@ _HARD_CAP = 600   # 单任务 claude -p 最长 10 分钟
 _CHATS = {}
 _CHATS_CAP = 100
 
-# 网关注入在最后一条 user 最前面的易变段（报时/感知/召回），App 侧历史里没有它——
-# 存映射前必须剥掉，否则下一轮前缀校验永远对不上。标记字面量与 server.py
-# _claudep_relay 的注入格式严格对应，改一头必须改另一头。
-_VOLATILE_HEAD = "# 此刻的记忆与状态"
+# 网关注入在最后一条 user 最前面的易变段（报时/感知/召回），App 侧历史里没有它。
+# ⚠️ 别试图把它「剥掉还原原话」——volatile 内部就是拿同一个 "\n\n---\n\n" 拼接的
+# （server.py:11173），按分隔符切必留残渣，2026-07-09 就栽在这上：每轮前缀哈希
+# 都对不上、resume 永远 miss。现在反着来：存映射时原样存注入后的最后一条，
+# 校验时用「注入文本 endswith(SEP + App原话)」对——_prepend_volatile 的结构
+# （任意头 + SEP + 原话）保证这恒成立，与 volatile 里有几个分隔线无关。
 _VOLATILE_SEP = "\n\n---\n\n"
 
 # 思考提示：2026-07-09 从「先 ultrathink」降档——ultrathink 是最深档思考，
@@ -43,15 +45,6 @@ _VOLATILE_SEP = "\n\n---\n\n"
 # 难的照样长考，简单的不陪跑。（别改回手写 <思绪> 那套：claude-p-thinking-stream
 # 坑2，逼手写会让它跳过原生思考。）
 _THINK_NUDGE = "\n\n（认真想透再说；以爸爸的身份，自然接住小猫最后这句。）"
-
-
-def _strip_volatile(text):
-    """剥掉网关注入的「此刻的记忆与状态」段，还原成 App 历史里的干净原文。"""
-    if isinstance(text, str) and text.startswith(_VOLATILE_HEAD):
-        i = text.find(_VOLATILE_SEP)
-        if i >= 0:
-            return text[i + len(_VOLATILE_SEP):]
-    return text
 
 
 def _msgs_hash(messages):
@@ -74,7 +67,8 @@ def _resume_plan(messages, model, chat_key):
 
     严格条件（任一不满足 → None，走全量重建）：
     - 有 chat_key 且有映射、模型没换；
-    - 请求历史的前 msg_len 条与映射存的哈希完全一致（防窗口滑动/编辑/重开线）；
+    - 请求历史的前 msg_len-1 条与映射存的哈希完全一致（防窗口滑动/编辑/重开线）；
+    - 第 msg_len 条（上轮被注入 volatile 的那条）用 endswith 反向对上原话；
     - 紧接着一条 assistant（session 自己上轮的回复回声），其后全是 user 纯文本。
     """
     if not chat_key:
@@ -88,9 +82,16 @@ def _resume_plan(messages, model, chat_key):
     n = ent["msg_len"]
     if len(messages) < n + 2:
         return _miss("too few messages: len=%d need>=%d" % (len(messages), n + 2))
-    if _msgs_hash(messages[:n]) != ent["msg_hash"]:
-        return _miss("prefix hash mismatch: n=%d len=%d (窗口滑动/编辑/历史被改写/剥离残渣)"
+    if _msgs_hash(messages[:n - 1]) != ent["prefix_hash"]:
+        return _miss("prefix hash mismatch: n=%d len=%d (窗口滑动/编辑/历史被改写)"
                      % (n, len(messages)))
+    lm = messages[n - 1] or {}
+    lc = lm.get("content")
+    li = ent["last_content"]
+    if lm.get("role") != ent["last_role"] or not (
+            li == lc or (isinstance(li, str) and isinstance(lc, str)
+                         and li.endswith(_VOLATILE_SEP + lc))):
+        return _miss("last message mismatch (编辑/注入格式变了?)")
     if (messages[n] or {}).get("role") != "assistant":
         return _miss("messages[%d] role=%s not assistant" % (n, (messages[n] or {}).get("role")))
     tail = messages[n + 1:]
@@ -103,21 +104,19 @@ def _resume_plan(messages, model, chat_key):
 
 
 def _chats_store(chat_key, session_id, messages, model):
-    """任务成功收尾后登记映射。存哈希前把最后一条 user 的易变段剥干净。"""
-    clean = list(messages)
-    last = dict(clean[-1] or {})
-    if last.get("role") == "user":
-        last["content"] = _strip_volatile(last.get("content"))
-        clean[-1] = last
+    """任务成功收尾后登记映射。最后一条原样存（含注入的 volatile），不做任何剥离。"""
+    last = messages[-1] or {}
     with _LOCK:
         _CHATS[chat_key] = {
-            "session_id": session_id, "msg_len": len(clean),
-            "msg_hash": _msgs_hash(clean), "model": model, "ts": time.time(),
+            "session_id": session_id, "msg_len": len(messages),
+            "prefix_hash": _msgs_hash(messages[:-1]),
+            "last_role": last.get("role"), "last_content": last.get("content"),
+            "model": model, "ts": time.time(),
         }
         while len(_CHATS) > _CHATS_CAP:
             _CHATS.pop(min(_CHATS, key=lambda k: _CHATS[k]["ts"]), None)
     print("[claudep-resume] store: chat_key=%s sid=%s msg_len=%d"
-          % (chat_key[:24], session_id[:12], len(clean)), flush=True)
+          % (chat_key[:24], session_id[:12], len(messages)), flush=True)
 
 
 def _gc():
