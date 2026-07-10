@@ -52,6 +52,7 @@ from token_store import TokenStore
 from device_token_store import DeviceTokenStore
 import claudep_ext
 import claudep_jobs
+import tg_poller
 
 
 def _compress_upload_image(raw: bytes, max_dim: int = 1024, quality: int = 80) -> bytes:
@@ -432,6 +433,13 @@ class ServerState:
         self.started_at: float = time.time()
         # 完整 config 引用 (anthropic dashboard url 等)
         self.config: dict[str, Any] = config
+
+        tg_cfg = config.get("telegram", {})
+        self.tg_cc_bot_token: str = tg_cfg.get("cc_bot_token", "")
+        self.tg_cc_chat_id: str = str(tg_cfg.get("cc_chat_id", ""))
+        self.tg_poll_interval: float = float(tg_cfg.get("poll_interval", 2))
+        self.tg_proxy: str = tg_cfg.get("proxy", "")
+        self.tg_offset_path: Path = Path(self.token_store_path).parent / "tg_offset.txt"
 
         logger.info(
             "loaded apns_enabled=%s bundle_id=%s sandbox=%s store=%s tokens=%d tasks_active=%s",
@@ -4920,6 +4928,9 @@ def run_server(state: ServerState):
         target=cleanup_loop, args=(state,), daemon=True, name="cleanup"
     )
     cleanup_thread.start()
+    threading.Thread(
+        target=tg_poller.tg_poller_loop, args=(state,), daemon=True, name="tg_poller"
+    ).start()
     try:
         server.serve_forever()
     except KeyboardInterrupt:
