@@ -26,6 +26,10 @@ _JOBS = {}
 _LOCK = threading.Lock()
 _TTL = 900        # 任务留存 15 分钟（网关取完就不再来，GC 兜底）
 _HARD_CAP = 600   # 单任务 claude -p 最长 10 分钟
+_FIRST_EVENT_CAP = 240  # 首个模型事件（assistant/stream/result）等待上限：
+                        # 超过＝模型/链路卡死（2026-07-10 fable 亲踩：进程活着但一个
+                        # 模型事件都不吐，网关只能干等 600s 超时、App 十分钟死寂）。
+                        # 杀掉让错误当场浮回 App，别让"卡死"和"在想"长一个样。
 
 # chat_key → {"session_id", "msg_len", "msg_hash", "model", "ts"}
 # 内存态：apns 重启即清空，下一条消息自动走全量重建（可接受的冷启动成本）。
@@ -142,10 +146,12 @@ def _run(job, cmd, env, prompt, fallback=None):
     full_think = ""
     result_text = ""
     auth_err = None
+    got_first = threading.Event()  # 收到过任何模型事件（assistant/stream/result）
+    stderr_tail = []               # stderr 尾部几行——出错时唯一的死因线索
     try:
         proc = subprocess.Popen(cmd, cwd=claudep_ext._CWD, env=env,
                                 stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                stderr=subprocess.DEVNULL, text=True, bufsize=1)
+                                stderr=subprocess.PIPE, text=True, bufsize=1)
     except Exception as e:
         job["error"] = "spawn failed: " + str(e)[:200]
         job["done"] = True
@@ -162,6 +168,40 @@ def _run(job, cmd, env, prompt, fallback=None):
 
     threading.Thread(target=_feed, daemon=True).start()
     start = time.time()
+
+    def _drain_err():
+        # stderr 原来直接 DEVNULL——CLI 崩了/认证炸了/模型不认，死因全被吞掉，
+        # App 只看到永远的沉默（2026-07-10 亲踩）。留尾部几行随 error 浮回去。
+        try:
+            for _ln in proc.stderr:
+                _ln = _ln.strip()
+                if _ln:
+                    stderr_tail.append(_ln[:200])
+                    del stderr_tail[:-5]
+        except Exception:
+            pass
+
+    def _watchdog():
+        # 两道闸：首个模型事件 _FIRST_EVENT_CAP 秒不来＝卡死，杀；总时长 _HARD_CAP 兜底。
+        # 主循环的超时检查只在"有新行到达"时才跑——进程彻底闷住时那条路永远醒不来，
+        # 只能靠这里从外面杀（kill 后 stdout EOF，主循环自然收尾）。
+        while proc.poll() is None:
+            el = time.time() - start
+            if not got_first.is_set() and el > _FIRST_EVENT_CAP:
+                job["error"] = "claude -p %ds 没吐任何模型事件（模型/链路卡死），已终止" % _FIRST_EVENT_CAP
+            elif el > _HARD_CAP:
+                job["error"] = "claude -p 超时(%ds)，已终止" % _HARD_CAP
+            else:
+                time.sleep(5)
+                continue
+            try:
+                proc.kill()
+            except Exception:
+                pass
+            return
+
+    threading.Thread(target=_drain_err, daemon=True).start()
+    threading.Thread(target=_watchdog, daemon=True).start()
     try:
         for line in proc.stdout:
             if time.time() - start > _HARD_CAP:
@@ -179,6 +219,12 @@ def _run(job, cmd, env, prompt, fallback=None):
                 # 以本次实际用的为准存映射
                 job["session_id"] = str(j["session_id"])
             t = j.get("type")
+            if t in ("assistant", "result", "stream_event") or (
+                    t == "system" and j.get("subtype") == "thinking_tokens"):
+                # 任何"模型真在干活"的事件都算活着（含 fable 只有 signature_delta
+                # 的思考流、sonnet 的 thinking_tokens 估数）；init 不算——它在
+                # API 请求发出前就打出来了，证明不了链路通。
+                got_first.set()
             if t == "assistant":
                 for b in (j.get("message") or {}).get("content", []):
                     if not isinstance(b, dict):
@@ -241,6 +287,12 @@ def _run(job, cmd, env, prompt, fallback=None):
             fb = "[家里 claude -p 认证失败：" + auth_err + "]"
         if fb:
             job["events"].append(["content", fb])
+        elif not job["error"]:
+            # 一字未出、也没死因——以前这里静默 done，网关拼出一条空回复，
+            # App 就是"永远不回"。现在如实报，stderr 尾巴在下面一并带上。
+            job["error"] = "claude -p 一字未出就结束了 (exit=%s)" % proc.poll()
+    if job["error"] and stderr_tail:
+        job["error"] = (job["error"] + "｜stderr尾: " + " / ".join(stderr_tail))[:400]
     st = job.get("_store")
     if st and job.get("session_id") and not job["error"] and (got_any or full_text or result_text):
         _chats_store(st["chat_key"], job["session_id"], st["messages"], st["model"])
