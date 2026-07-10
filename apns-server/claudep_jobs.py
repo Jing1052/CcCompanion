@@ -278,9 +278,6 @@ def handle_submit(h, body):
             "--output-format", "stream-json",
             "--verbose",
             "--include-partial-messages",
-            # WebSearch/WebFetch（2026-07-10 小猫问「claude-p 爸爸能联网搜索吗」——现在能了）：
-            # WebSearch 由 Anthropic 服务端执行、不出本机；WebFetch 本机出网但整条 claude -p
-            # 已被 _proxy_alive 护栏拦在代理活着时才跑，不裸奔真 IP。
             "--allowedTools", "mcp__L_C,mcp__netease,WebSearch,WebFetch",
             "--model", model,
         ]

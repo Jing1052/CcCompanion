@@ -50,6 +50,29 @@ from jwt_helper import APNsJWT
 from apns_client import APNsClient, APNsResponse
 from token_store import TokenStore
 from device_token_store import DeviceTokenStore
+import claudep_ext
+import claudep_jobs
+
+
+def _compress_upload_image(raw: bytes, max_dim: int = 1024, quality: int = 80) -> bytes:
+    """缩放上传图片到 max_dim 以内，省 Claude 视觉 token。"""
+    try:
+        img = Image.open(io.BytesIO(raw))
+        if img.mode in ("RGBA", "P"):
+            img = img.convert("RGB")
+        w, h = img.size
+        if max(w, h) > max_dim:
+            ratio = max_dim / max(w, h)
+            img = img.resize((int(w * ratio), int(h * ratio)), Image.LANCZOS)
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=quality, optimize=True)
+        result = buf.getvalue()
+        logger.info("[upload] image compressed: %dKB → %dKB (%dx%d)",
+                    len(raw) // 1024, len(result) // 1024, img.size[0], img.size[1])
+        return result
+    except Exception as e:
+        logger.warning("[upload] image compress failed: %s, using original", e)
+        return raw
 from task_queue import TaskQueue
 from chat_history import ChatHistory, EphemeralTaskBuffer
 from diary_stream import DiaryStream
@@ -1109,6 +1132,27 @@ class PushHandler(BaseHTTPRequestHandler):
         elif self.path == "/watcher/mode":
             self._handle_watcher_mode_set(body)
             return
+        elif self.path == "/claudep/chat":
+            claudep_ext.handle_claudep(self, body)
+            return
+        elif self.path == "/claudep/submit":
+            claudep_jobs.handle_submit(self, body)
+            return
+        elif self.path == "/claudep/poll":
+            claudep_jobs.handle_poll(self, body)
+            return
+        elif self.path == "/claudep/reauth/start":
+            if not self.state.allow_remote_control:
+                self._send_json(403, {"error": "remote_control disabled"})
+                return
+            self._handle_claudep_reauth_start(body)
+            return
+        elif self.path == "/claudep/reauth/code":
+            if not self.state.allow_remote_control:
+                self._send_json(403, {"error": "remote_control disabled"})
+                return
+            self._handle_claudep_reauth_code(body)
+            return
         else:
             self._send_json(404, {"error": "not found"})
 
@@ -1148,6 +1192,86 @@ class PushHandler(BaseHTTPRequestHandler):
             self._send_json(200, {"ok": True, "mode": mode})
         except Exception as e:
             self._send_json(500, {"error": str(e)})
+
+    # ── claudep reauth: 远程 OAuth token 轮换 ──
+
+    _SETUPTOK_SESSION = "setuptok"
+    _SETUPTOK_LOG = "/tmp/setuptok.log"
+    _CLAUDEP_TOKEN_FILE = "/home/cing/.claude/.claudep_token"
+
+    def _handle_claudep_reauth_start(self, body: dict[str, Any]):
+        """启动 claude setup-token，抓授权 URL 返回。重复调用先 kill 旧窗口。"""
+        import subprocess as _sp
+        import re as _re
+        _sp.run(["tmux", "kill-session", "-t", self._SETUPTOK_SESSION], capture_output=True)
+        time.sleep(0.5)
+        _sp.run([
+            "tmux", "new-session", "-d", "-s", self._SETUPTOK_SESSION,
+            f"source /home/cing/session-watcher/proxy.env; claude setup-token 2>&1 | tee {self._SETUPTOK_LOG}"
+        ], capture_output=True)
+        for _ in range(15):
+            time.sleep(1)
+            try:
+                log = open(self._SETUPTOK_LOG).read()
+            except FileNotFoundError:
+                continue
+            m = _re.search(r'(https://[^\s]+)', log)
+            if m:
+                url = m.group(1)
+                logger.info("[claudep-reauth] auth URL captured (not logging URL)")
+                self._send_json(200, {"ok": True, "auth_url": url})
+                return
+        self._send_json(504, {"error": "setup-token did not produce auth URL within 15s"})
+
+    def _handle_claudep_reauth_code(self, body: dict[str, Any]):
+        """把用户授权后的 code 喂给 setup-token 窗口，成功后写 .claudep_token。"""
+        import subprocess as _sp
+        code = (body.get("code") or "").strip()
+        if not code:
+            self._send_json(400, {"error": "code required"})
+            return
+        result = _sp.run(
+            ["tmux", "has-session", "-t", self._SETUPTOK_SESSION],
+            capture_output=True
+        )
+        if result.returncode != 0:
+            self._send_json(409, {"error": "no setuptok session running, call /reauth/start first"})
+            return
+        _sp.run(
+            ["tmux", "send-keys", "-t", self._SETUPTOK_SESSION, code, "Enter"],
+            capture_output=True
+        )
+        for _ in range(10):
+            time.sleep(1)
+            try:
+                log = open(self._SETUPTOK_LOG).read()
+            except FileNotFoundError:
+                continue
+            if "Token saved" in log or "successfully" in log.lower():
+                cred_path = "/home/cing/.claude/.credentials.json"
+                try:
+                    import json as _json
+                    creds = _json.loads(open(cred_path).read())
+                    token = creds.get("claudeAiOauth", {}).get("accessToken", "")
+                    if token:
+                        with open(self._CLAUDEP_TOKEN_FILE, "w") as f:
+                            f.write(token)
+                        os.chmod(self._CLAUDEP_TOKEN_FILE, 0o600)
+                        logger.info("[claudep-reauth] new token written to %s", self._CLAUDEP_TOKEN_FILE)
+                        _sp.run(["tmux", "kill-session", "-t", self._SETUPTOK_SESSION], capture_output=True)
+                        try:
+                            os.unlink(self._SETUPTOK_LOG)
+                        except OSError:
+                            pass
+                        self._send_json(200, {
+                            "ok": True,
+                            "note": "token written; claudep_ext reads token per-request, no apns restart needed"
+                        })
+                        return
+                except Exception as e:
+                    logger.warning("[claudep-reauth] credential extraction failed: %s", e)
+        _sp.run(["tmux", "kill-session", "-t", self._SETUPTOK_SESSION], capture_output=True)
+        self._send_json(500, {"error": "setup-token did not confirm success within 10s"})
 
     def _handle_register(self, body: dict[str, Any]):
         token = body.get("token")
